@@ -10,6 +10,7 @@ class APIClient:
     def __init__(self, base_url: str = "http://localhost:8080"):
         self.base_url = base_url
         self.token: Optional[str] = None
+        self.lab_id: Optional[int] = None
     
     def set_token(self, token: str):
         """Set authentication token."""
@@ -18,6 +19,11 @@ class APIClient:
     def clear_token(self):
         """Clear authentication token."""
         self.token = None
+        self.lab_id = None
+
+    def set_lab(self, lab_id: int):
+        """Set current lab context."""
+        self.lab_id = lab_id
     
     def _get_headers(self) -> dict:
         """Get request headers with authentication."""
@@ -31,7 +37,11 @@ class APIClient:
         with httpx.Client() as client:
             response = client.post(
                 f"{self.base_url}/api/auth/login",
-                json={"username": username, "password": password},
+                json={
+                    "username": username,
+                    "password": password,
+                    "lab_id": self.lab_id,
+                },
                 headers=self._get_headers(),
                 timeout=10.0,
             )
@@ -48,6 +58,13 @@ class APIClient:
                 headers=self._get_headers(),
                 timeout=10.0,
             )
+            response.raise_for_status()
+            return response.json()
+
+    def get_labs(self) -> list[dict]:
+        """Get list of labs for selection (unauthenticated)."""
+        with httpx.Client() as client:
+            response = client.get(f"{self.base_url}/api/labs/")
             response.raise_for_status()
             return response.json()
 

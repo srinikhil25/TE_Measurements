@@ -9,6 +9,7 @@ class WorkbookBase(BaseModel):
     material_type: Optional[str] = None
     sample_id_code: Optional[str] = None
     date_received: Optional[date] = None
+    lab_id: int
 
 
 class WorkbookCreate(WorkbookBase):

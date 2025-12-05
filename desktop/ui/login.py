@@ -14,10 +14,13 @@ from desktop.api_client import APIClient
 
 
 class LoginScreen:
-    def __init__(self, page: ft.Page, on_login_success: Callable):
+    def __init__(self, page: ft.Page, on_login_success: Callable, lab: Optional[dict] = None):
         self.page = page
         self.on_login_success = on_login_success
         self.api_client = APIClient()
+        self.lab = lab
+        if self.lab and "lab_id" in self.lab:
+            self.api_client.set_lab(self.lab["lab_id"])
         
         # UI Components
         self.username_field = ft.TextField(
@@ -124,6 +127,8 @@ class LoginScreen:
                 color=ft.Colors.BLUE,
             )
         
+        subtitle_lab = self.lab["lab_name"] if self.lab and "lab_name" in self.lab else "Ikeda-Hamasaki Laboratory"
+
         logo = ft.Container(
             content=ft.Column(
                 controls=[
@@ -135,7 +140,7 @@ class LoginScreen:
                         text_align=ft.TextAlign.CENTER,
                     ),
                     ft.Text(
-                        "Ikeda-Hamasaki Laboratory",
+                        subtitle_lab,
                         size=16,
                         weight=ft.FontWeight.BOLD,
                         color=ft.Colors.BLUE_700,

@@ -9,6 +9,7 @@ class UserBase(BaseModel):
     email: EmailStr
     full_name: Optional[str] = None
     role: UserRole = UserRole.RESEARCHER
+    lab_id: Optional[int] = None  # None only for SUPER_ADMIN
 
 
 class UserCreate(UserBase):
@@ -21,6 +22,7 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+    lab_id: Optional[int] = None
 
 
 class User(UserBase):

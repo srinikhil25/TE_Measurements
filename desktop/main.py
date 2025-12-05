@@ -10,6 +10,7 @@ sys.path.insert(0, str(project_root))
 
 import flet as ft
 from desktop.ui.login import LoginScreen
+from desktop.ui.lab_selection import LabSelectionScreen
 
 
 def main(page: ft.Page):
@@ -27,32 +28,24 @@ def main(page: ft.Page):
     
     def on_login_success(token: str):
         """Handle successful login."""
-        # Store token (you can use secure storage later)
+        # Store token
         page.client_storage.set("auth_token", token)
         
-        # TODO: Navigate to dashboard
-        # For now, just show success message
-        page.clean()
-        page.add(
-            ft.Container(
-                content=ft.Column(
-                    controls=[
-                        ft.Text("Login Successful!", size=24, weight=ft.FontWeight.BOLD),
-                        ft.Text(f"Token: {token[:20]}...", size=12),
-                        ft.Text("Dashboard coming soon...", size=14),
-                    ],
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=20,
-                ),
-                alignment=ft.alignment.center,
-                expand=True,
-            )
-        )
-        page.update()
+        # Route to appropriate dashboard based on role
+        from desktop.ui.dashboards.dashboard_router import DashboardRouter
+        router = DashboardRouter(page, token)
+        router.route_to_dashboard()
     
-    # Show login screen
-    login_screen = LoginScreen(page, on_login_success)
-    page.add(login_screen.build())
+    def show_login_screen(selected_lab: dict):
+        """Show login screen for selected lab."""
+        page.clean()
+        login_screen = LoginScreen(page, on_login_success, lab=selected_lab)
+        page.add(login_screen.build())
+        page.update()
+
+    # Initial screen: lab selection
+    lab_selection = LabSelectionScreen(page, on_lab_selected=show_login_screen)
+    page.add(lab_selection.build())
     page.update()
 
 

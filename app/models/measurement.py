@@ -22,6 +22,7 @@ class Measurement(Base):
     __tablename__ = "measurements"
 
     id = Column(Integer, primary_key=True, index=True)
+    lab_id = Column(Integer, ForeignKey("labs.lab_id"), nullable=False)
     workbook_id = Column(Integer, ForeignKey("workbooks.id"), nullable=False)
     researcher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     measurement_type = Column(Enum(MeasurementType), nullable=False)
@@ -33,6 +34,7 @@ class Measurement(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
+    lab = relationship("Lab", back_populates="measurements")
     workbook = relationship("Workbook", back_populates="measurements")
     researcher = relationship("User", back_populates="measurements")
 
