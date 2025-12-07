@@ -4,7 +4,7 @@ Lab admins can see all users and data within their lab.
 """
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent.parent
@@ -17,13 +17,14 @@ from desktop.api_client import APIClient
 class LabAdminDashboard:
     """Dashboard for lab admins - can see all data in their lab."""
     
-    def __init__(self, page: ft.Page, token: str, user_info: Dict, lab_id: int):
+    def __init__(self, page: ft.Page, token: str, user_info: Dict, lab_id: int, on_logout: Optional[Callable] = None):
         self.page = page
         self.token = token
         self.user_info = user_info
         self.lab_id = lab_id
         self.api_client = APIClient()
         self.api_client.set_token(token)
+        self.on_logout = on_logout
         
         # State
         self.current_tab = "overview"
@@ -261,8 +262,15 @@ class LabAdminDashboard:
     
     def _handle_logout(self, e):
         """Handle logout."""
+        # Clear token
         self.page.client_storage.remove("auth_token")
-        self.page.snack_bar = ft.SnackBar(content=ft.Text("Logout - Coming soon"))
-        self.page.snack_bar.open = True
-        self.page.update()
+        self.api_client.clear_token()
+        
+        # Call logout callback if provided
+        if self.on_logout:
+            self.on_logout()
+        else:
+            # Fallback: use logout handler
+            from desktop.ui.dashboards.logout_handler import handle_logout
+            handle_logout(self.page)
 

@@ -3,7 +3,7 @@ Super Admin Dashboard - Central admin can see and manage all labs.
 """
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent.parent
@@ -16,12 +16,13 @@ from desktop.api_client import APIClient
 class SuperAdminDashboard:
     """Dashboard for super admin - can see all labs and manage everything."""
     
-    def __init__(self, page: ft.Page, token: str, user_info: Dict):
+    def __init__(self, page: ft.Page, token: str, user_info: Dict, on_logout: Optional[Callable] = None):
         self.page = page
         self.token = token
         self.user_info = user_info
         self.api_client = APIClient()
         self.api_client.set_token(token)
+        self.on_logout = on_logout
         
         # State
         self.current_tab = "overview"
@@ -259,8 +260,15 @@ class SuperAdminDashboard:
     
     def _handle_logout(self, e):
         """Handle logout."""
+        # Clear token
         self.page.client_storage.remove("auth_token")
-        self.page.snack_bar = ft.SnackBar(content=ft.Text("Logout - Coming soon"))
-        self.page.snack_bar.open = True
-        self.page.update()
+        self.api_client.clear_token()
+        
+        # Call logout callback if provided
+        if self.on_logout:
+            self.on_logout()
+        else:
+            # Fallback: use logout handler
+            from desktop.ui.dashboards.logout_handler import handle_logout
+            handle_logout(self.page)
 

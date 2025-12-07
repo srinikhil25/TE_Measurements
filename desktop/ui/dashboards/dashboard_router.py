@@ -3,7 +3,7 @@ Dashboard router - routes users to appropriate dashboard based on role.
 """
 import sys
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Callable
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent.parent
@@ -19,10 +19,11 @@ from desktop.core.security import decode_jwt_token
 class DashboardRouter:
     """Routes users to the appropriate dashboard based on their role."""
     
-    def __init__(self, page: ft.Page, token: str):
+    def __init__(self, page: ft.Page, token: str, on_logout_callback: Optional[Callable] = None):
         self.page = page
         self.token = token
         self.user_info: Optional[Dict] = None
+        self.on_logout_callback = on_logout_callback
         
     def decode_token(self) -> Dict:
         """Decode JWT token to get user info."""
@@ -75,11 +76,11 @@ class DashboardRouter:
         self.page.horizontal_alignment = ft.CrossAxisAlignment.START
         
         if role == "super_admin":
-            dashboard = SuperAdminDashboard(self.page, self.token, user_info)
+            dashboard = SuperAdminDashboard(self.page, self.token, user_info, on_logout=self.on_logout_callback)
         elif role == "lab_admin":
-            dashboard = LabAdminDashboard(self.page, self.token, user_info, lab_id)
+            dashboard = LabAdminDashboard(self.page, self.token, user_info, lab_id, on_logout=self.on_logout_callback)
         elif role == "researcher":
-            dashboard = ResearcherDashboard(self.page, self.token, user_info, lab_id)
+            dashboard = ResearcherDashboard(self.page, self.token, user_info, lab_id, on_logout=self.on_logout_callback)
         else:
             # Fallback - show error
             self.page.add(
