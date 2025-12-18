@@ -115,19 +115,10 @@ class BaseDashboard(QWidget):
         if user:
             self.current_user = user
             self.welcome_label.setText(f"Welcome, {user.full_name}")
-            
-            # Update user info (avoid lazy-loading relationships on detached instances)
-            lab_info = ""
-            try:
-                lab_obj = getattr(user, "lab", None)
-                if lab_obj is not None and getattr(lab_obj, "name", None):
-                    lab_info = f" | Lab: {lab_obj.name}"
-            except Exception as e:
-                # In case of DetachedInstanceError or similar, just omit lab info
-                print(f"[BaseDashboard] Warning: could not access user.lab for header: {e}")
-                lab_info = ""
 
-            self.user_info_label.setText(f"{self._get_role_display_name()}{lab_info}")
+            # For now, only show the role in the header to avoid lazy-loading
+            # relationships (like user.lab) on detached instances.
+            self.user_info_label.setText(self._get_role_display_name())
     
     def load_data(self):
         """
