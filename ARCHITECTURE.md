@@ -1,279 +1,138 @@
-# Seebeck Measurement System - Architecture Plan
+# TE Measurements - Architecture Documentation
 
 ## Overview
-Industry-standard desktop application for Seebeck coefficient measurements with secure authentication and admin-controlled user management.
 
-## Technology Stack
+TE Measurements is a desktop application built with PyQt6 for managing Seebeck measurements, electrical resistivity, and thermal conductivity data with strict multi-tenant access control.
 
-### Backend
-- **Python 3.14.1**
-- **FastAPI** - Modern, fast web framework for API
-- **SQLAlchemy** - ORM for database management
-- **SQLite/PostgreSQL** - Database (SQLite for development, PostgreSQL for production)
-- **PyVISA** - Instrument communication
-- **Pydantic** - Data validation
-- **Passlib** - Password hashing (bcrypt)
-- **python-jose** - JWT tokens for authentication
+## Architecture Layers
 
-### Frontend
-- **Flet** - Cross-platform desktop UI framework
-- **Matplotlib** - Data visualization
-- **Pandas** - Data manipulation
+### 1. Presentation Layer (GUI)
+- **Location**: `src/gui/`
+- **Framework**: PyQt6
+- **Components**:
+  - `main_window.py`: Main application window with role-based dashboard switching
+  - `login_window.py`: Authentication interface
+  - `researcher_dashboard.py`: Researcher workspace
+  - `lab_admin_dashboard.py`: Lab administrator interface
+  - `super_admin_dashboard.py`: System administration interface
 
-## Project Structure
+### 2. Business Logic Layer (Services)
+- **Location**: `src/services/`
+- **Components**:
+  - `workbook_service.py`: Workbook CRUD operations with access control
+  - `measurement_service.py`: Measurement creation and retrieval (immutable data)
+  - `statistics_service.py`: Statistics and reporting generation
 
-```
-TE_Measurement/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                 # FastAPI application entry
-│   ├── config.py               # Configuration management
-│   ├── database.py             # Database connection & session
-│   │
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── deps.py             # Dependencies (auth, db session)
-│   │   ├── routes/
-│   │   │   ├── __init__.py
-│   │   │   ├── auth.py         # Authentication endpoints
-│   │   │   ├── users.py        # User management (admin only)
-│   │   │   ├── measurements.py # Measurement endpoints
-│   │   │   └── instruments.py  # Instrument control
-│   │   │
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── security.py         # Password hashing, JWT
-│   │   ├── config.py            # Settings
-│   │   └── instrument.py       # Instrument classes (extracted)
-│   │
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── user.py             # User SQLAlchemy model
-│   │   ├── measurement.py     # Measurement data models
-│   │   └── schemas.py          # Pydantic schemas
-│   │
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── auth_service.py     # Authentication logic
-│   │   ├── user_service.py    # User management
-│   │   ├── measurement_service.py # Measurement logic
-│   │   └── instrument_service.py  # Instrument control
-│   │
-│   └── utils/
-│       ├── __init__.py
-│       └── logger.py           # Logging configuration
-│
-├── desktop/
-│   ├── __init__.py
-│   ├── main.py                 # Flet desktop app entry
-│   ├── ui/
-│   │   ├── __init__.py
-│   │   ├── login.py            # Login screen
-│   │   ├── dashboard.py        # Main dashboard
-│   │   ├── measurement_panel.py # Measurement UI
-│   │   └── admin_panel.py      # Admin user management
-│   │
-│   └── api_client.py           # API client for backend
-│
-├── tests/
-│   ├── __init__.py
-│   ├── test_auth.py
-│   ├── test_measurements.py
-│   └── test_instruments.py
-│
-├── migrations/                 # Alembic database migrations
-├── requirements.txt
-├── README.md
-├── INSTRUMENT_CONNECTIONS.md
-└── ARCHITECTURE.md
+### 3. Data Access Layer (Models)
+- **Location**: `src/models/`
+- **ORM**: SQLAlchemy
+- **Models**:
+  - `User`: User accounts with role-based access
+  - `Lab`: Lab organization units
+  - `Workbook`: Experiment containers (one per sample)
+  - `Measurement`: Immutable instrument data (Seebeck, Resistivity, Thermal Conductivity)
+  - `Comment`: Lab admin comments on workbooks
+  - `AuditLog`: System audit trail
 
-```
+### 4. Authentication & Authorization
+- **Location**: `src/auth/`
+- **Components**:
+  - `auth_manager.py`: Authentication and permission checking
+  - `session.py`: Session management
 
-## Authentication System
+### 5. Instrument Integration
+- **Location**: `src/instruments/`
+- **Components**:
+  - `keithley_connection.py`: Interface for Keithley instrument (to be integrated)
 
-### User Roles
-1. **Admin** - Full access, can manage users
-2. **Researcher** - Can perform measurements, view data
-
-### Authentication Flow
-1. User logs in with username/password
-2. Backend validates credentials
-3. JWT token issued with user role
-4. Token stored securely in desktop app
-5. All API requests include token in Authorization header
-6. Backend validates token and checks permissions
-
-### User Management
-- **No self-registration** - Only admins can create users
-- Admin panel for:
-  - Create new users
-  - Edit user details
-  - Deactivate/activate users
-  - Change user roles
-  - Reset passwords
-
-### Security Features
-- Password hashing with bcrypt
-- JWT tokens with expiration
-- Role-based access control (RBAC)
-- Secure token storage
-- Session management
+### 6. Utilities
+- **Location**: `src/utils/`
+- **Components**:
+  - `config_loader.py`: Configuration management
 
 ## Database Schema
 
-### Users Table
-```sql
-- id (Primary Key)
-- username (Unique)
-- email (Unique)
-- hashed_password
-- full_name
-- role (admin/researcher)
-- is_active (boolean)
-- created_at
-- updated_at
-- created_by (admin who created this user)
+### Core Entities
+
+```
+User (id, username, email, password_hash, role, lab_id, ...)
+  ├── Lab (id, name, admin_id, ...)
+  ├── Workbook (id, title, researcher_id, lab_id, ...)
+  │   ├── Measurement (id, workbook_id, measurement_type, raw_data_path, parsed_data, ...)
+  │   └── Comment (id, workbook_id, author_id, content, ...)
+  └── AuditLog (id, user_id, action_type, ...)
 ```
 
-### Workbooks Table (Samples)
-```sql
-- id (Primary Key)
-- name (workbook/sample name) - required
-- description (optional)
-- material_type (optional)
-- sample_id_code (optional)
-- date_received (optional)
-- researcher_id (Foreign Key -> Users.id)
-- created_at
-- updated_at
-- is_active (boolean)
-```
+### Access Control Model
 
-### Measurements Table
-```sql
-- id (Primary Key)
-- workbook_id (Foreign Key -> Workbooks.id)
-- researcher_id (Foreign Key -> Users.id)
-- measurement_type (seebeck/electrical_conductivity/resistance_conductivity)
-- measurement_params (JSON - stores all measurement parameters)
-- status (running/completed/failed)
-- started_at
-- completed_at
-- data_file_path (path to stored measurement data - hybrid storage)
-- created_at
-```
+1. **Researcher**: Can only access own workbooks
+2. **Lab Admin**: Can view all workbooks in their lab, can comment
+3. **Super Admin**: Full system access
 
-### Measurement Data Table (or JSON storage)
-```sql
-- id (Primary Key)
-- measurement_id (Foreign Key -> Measurements.id)
-- timestamp
-- temf_mv (float)
-- temp1_c (float)
-- temp2_c (float)
-- delta_temp_c (float)
-- current_value (float)
-```
+## Data Flow
 
-## Data Isolation
+### Measurement Workflow
 
-- **Researchers** can only access:
-  - Their own workbooks/samples
-  - Measurements within their workbooks
-  - Cannot see other researchers' data
+1. Researcher creates a workbook
+2. Researcher connects to instrument (via GUI)
+3. Researcher selects measurement type (Seebeck/Resistivity/Thermal Conductivity)
+4. Instrument takes measurement
+5. Raw data saved to external drive
+6. Data parsed and stored in database
+7. Measurement appears in workbook's appropriate "page"
 
-- **Admins** can:
-  - Manage users (create, edit, deactivate)
-  - View all workbooks and measurements (professor oversight)
-  - Export system-wide data
-  - Access all researcher data
+### Access Control Flow
 
-## Workbook/Sample Structure
+1. User authenticates via `AuthManager`
+2. Session created via `SessionManager`
+3. All data access checked via `AuthManager.can_access_*()` methods
+4. Service layer enforces permissions
+5. GUI reflects user's permissions
 
-Each **Workbook** represents work on a different sample:
-- A researcher can have multiple workbooks
-- Each workbook contains multiple measurement sessions
-- Measurements are organized by workbook for easy management
-- Workbook metadata includes: name, description, material_type, sample_id_code, date_received
-- **Strictly private** - each workbook belongs only to its creator
-- Researchers can export data manually to share
-- **Measurement Types**: Seebeck, Electrical Conductivity, Resistance Conductivity
-- After creating workbook, user selects measurement type (each has its own template)
+## Security Features
 
-## API Endpoints
+1. **Password Hashing**: bcrypt with salt
+2. **Immutable Data**: Instrument measurements cannot be edited
+3. **Row-Level Security**: Lab-based data isolation
+4. **Audit Logging**: All actions logged
+5. **Session Management**: Secure session handling
+6. **Account Lockout**: Failed login attempt tracking
 
-### Authentication
-- `POST /api/auth/login` - Login, returns JWT token
-- `POST /api/auth/logout` - Logout (token invalidation)
-- `POST /api/auth/refresh` - Refresh token
+## Storage Architecture
 
-### Users (Admin only)
-- `GET /api/users` - List all users
-- `POST /api/users` - Create new user
-- `GET /api/users/{id}` - Get user details
-- `PUT /api/users/{id}` - Update user
-- `DELETE /api/users/{id}` - Deactivate user
-- `POST /api/users/{id}/reset-password` - Reset password
+- **Database**: Structured data (PostgreSQL/SQLite)
+- **File System**: Raw measurement files on external drive
+- **Backup**: Configurable backup location
 
-### Workbooks (Samples)
-- `GET /api/workbooks` - List user's workbooks
-- `POST /api/workbooks` - Create new workbook
-- `GET /api/workbooks/{id}` - Get workbook details
-- `PUT /api/workbooks/{id}` - Update workbook
-- `DELETE /api/workbooks/{id}` - Delete workbook (soft delete)
+## Workbook Structure
 
-### Measurements
-- `POST /api/workbooks/{workbook_id}/measurements/start` - Start measurement session
-- `POST /api/measurements/{id}/stop` - Stop measurement
-- `GET /api/measurements/{id}/status` - Get session status
-- `GET /api/measurements/{id}/data` - Get measurement data
-- `GET /api/workbooks/{workbook_id}/measurements` - Get all measurements in workbook
-- `POST /api/measurements/{id}/export` - Export single measurement data
-- `POST /api/workbooks/{workbook_id}/export` - Export all measurements in workbook
+Each workbook represents one experiment on one sample and contains:
+- **Page 1**: Seebeck measurements
+- **Page 2**: Resistivity measurements
+- **Page 3**: Thermal conductivity measurements
 
-### Instruments
-- `POST /api/instruments/connect` - Connect to instruments
-- `POST /api/instruments/disconnect` - Disconnect
-- `GET /api/instruments/status` - Get instrument status
+Each page can contain multiple measurements (time series, different conditions, etc.)
 
-## Development Phases
+## Extension Points
 
-### Phase 1: Foundation
-- [ ] Project structure setup
-- [ ] Database models and migrations
-- [ ] Basic FastAPI setup
-- [ ] Authentication system
-- [ ] User management (admin)
+1. **Instrument Integration**: Implement `KeithleyConnection` class
+2. **Data Parsing**: Extend `MeasurementService._calculate_statistics()`
+3. **Statistics**: Extend `StatisticsService` for custom reports
+4. **Export**: Add export functionality to services layer
 
-### Phase 2: Core Features
-- [ ] Instrument connection layer
-- [ ] Measurement session management
-- [ ] API endpoints for measurements
-- [ ] Basic desktop UI (login, dashboard)
+## Deployment Considerations
 
-### Phase 3: UI Development
-- [ ] Measurement panel UI
-- [ ] Real-time data visualization
-- [ ] Data export functionality
-- [ ] Admin panel UI
+- **Single Machine**: Application runs on dedicated CPU connected to instrument
+- **Database**: Local PostgreSQL or SQLite
+- **Storage**: External harddisk for raw data
+- **Multi-User**: Multiple users can run application, database enforces isolation
 
-### Phase 4: Testing & Polish
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] Error handling
-- [ ] Documentation
-- [ ] Deployment guide
+## Future Enhancements
 
-## Industry Standards Applied
-
-1. **Separation of Concerns** - Clear separation between API, services, and UI
-2. **Security** - Proper authentication, password hashing, JWT tokens
-3. **Database** - ORM with migrations, proper schema design
-4. **API Design** - RESTful endpoints, proper HTTP methods
-5. **Error Handling** - Comprehensive error handling and logging
-6. **Testing** - Unit and integration tests
-7. **Documentation** - Code documentation and API docs
-8. **Configuration** - Environment-based configuration
-9. **Logging** - Structured logging
-10. **Code Quality** - Type hints, linting, formatting
+1. Data export (CSV, Excel, JSON)
+2. Advanced plotting/visualization
+3. Measurement templates
+4. Automated backup
+5. Network deployment (optional)
+6. API for external integrations
 

@@ -1,2 +1,0 @@
-# FastAPI Application Package
-

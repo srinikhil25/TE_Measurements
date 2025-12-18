@@ -1,44 +1,29 @@
-# Web Framework
-fastapi>=0.115.0
-uvicorn[standard]>=0.34.0
-python-multipart>=0.0.9
-httpx>=0.28.0
-
-# Database
-sqlalchemy>=2.0.0
-alembic>=1.13.0
-
-# Authentication & Security
-python-jose[cryptography]>=3.3.0
-passlib[argon2]>=1.7.4
-python-multipart>=0.0.9
-
-# Data Validation
-pydantic>=2.11.0
-pydantic-settings>=2.5.0
-pydantic[email]>=2.11.0
-email-validator>=2.0.0
-
-# Instrument Communication
-pyvisa>=1.15.0
+# Core Dependencies
+PyQt6
+PyQt6-Qt6
+sqlalchemy
+psycopg2-binary
+python-dotenv
+configparser
+bcrypt
+python-jose[cryptography]
+passlib[bcrypt]
 
 # Data Processing
-numpy>=2.3.0
-pandas>=2.2.0
-matplotlib>=3.8.0
+numpy
+pandas
+scipy
 
-# Desktop UI
-flet>=0.28.0
-
-# Excel Export
-openpyxl>=3.1.0
+# Instrument Communication (to be updated with your existing code)
+pyserial
+pyvisa
 
 # Utilities
-python-dotenv>=1.0.0
-Pillow>=10.0.0
+python-dateutil
+pytz
 
-# Development (optional)
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-black>=24.0.0
-flake8>=7.0.0
+# Development
+pytest
+black
+flake8
+

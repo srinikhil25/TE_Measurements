@@ -1,150 +1,101 @@
-# Seebeck Measurement System
+# TE Measurements - Desktop Application
 
-A professional, industry-standard desktop application for Seebeck coefficient measurements with secure authentication and admin-controlled user management.
+A professional desktop application for researchers to measure Seebeck measurements, electrical resistivity, and thermal conductivity with strict access control and multi-tenant lab management.
 
 ## Features
 
-- 🔐 **Secure Authentication** - JWT-based authentication system
-- 👥 **Admin-Controlled Users** - Only admins can create and manage user accounts
-- 📚 **Workbook/Sample Management** - Organize measurements by sample
-- 📊 **Real-time Measurements** - Live data visualization and monitoring
-- 🔌 **Instrument Control** - Direct control of Keithley 2182A, 2700, and PK160 instruments
-- 📈 **Data Visualization** - Real-time graphs and charts
-- 💾 **Data Export** - Export measurements to CSV and Excel formats
-- 🖥️ **Cross-platform** - Works on Windows, Linux, and macOS
+- **Multi-tenant Lab Management**: Strict isolation between labs and researchers
+- **Role-Based Access Control**: Three roles (Researcher, Lab Admin, Super Admin)
+- **Workbook System**: Organize experiments with multiple measurement types
+- **Instrument Integration**: Direct connection to Keithley measurement setup
+- **Data Integrity**: Immutable instrument data with audit trails
+- **Statistics & Reporting**: Comprehensive analytics for all user roles
 
 ## Architecture
 
-This application follows industry best practices with:
-
-- **Backend**: FastAPI with SQLAlchemy ORM
-- **Frontend**: Flet desktop application
-- **Database**: SQLite (development) / PostgreSQL (production)
-- **Authentication**: JWT tokens with role-based access control
-- **Security**: Password hashing, secure token storage
-         
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation.
-
-## Prerequisites
-
-- Python 3.14.1
-- PyVISA backend (NI-VISA, pyvisa-py, or similar)
-- GPIB interface for Keithley instruments
+- **GUI Framework**: PyQt6 (cross-platform)
+- **Backend**: Python 3.9+
+- **Database**: PostgreSQL (with SQLite fallback)
+- **ORM**: SQLAlchemy
+- **Platforms**: Windows & Linux
 
 ## Installation
 
-1. **Clone or navigate to this directory:**
-   ```bash
-   cd TE_Measurement
-   ```
+### Prerequisites
 
-2. **Create and activate a virtual environment:**
-   ```bash
-   python -m venv venv
-   
-   # On Windows:
-   .\venv\Scripts\activate.bat
-   
-   # On macOS/Linux:
-   source venv/bin/activate
-   ```
+- Python 3.9 or higher
+- PostgreSQL (or SQLite for single-user setup)
+- Qt6 libraries
 
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Setup
 
-4. **Set up environment variables:**
-   ```bash
-   # Copy the example .env file
-   copy .env.example .env
-   
-   # Edit .env and set your SECRET_KEY (use a strong random key in production)
-   ```
-
-5. **Initialize database:**
-   ```bash
-   python scripts/init_db.py
-   ```
-   
-   This will:
-   - Create all database tables
-   - Create default admin user:
-     - Username: `admin`
-     - Password: `admin`
-     - ⚠️ **IMPORTANT**: Change this password in production!
-
-## Running the Application
-
-### Step 1: Start the Backend API Server
-
-Open a terminal and run:
+1. Install dependencies:
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+pip install -r requirements.txt
 ```
 
-The API will be available at `http://localhost:8000`
-API documentation at `http://localhost:8000/docs`
+2. Configure database connection in `config/config.ini`
 
-### Step 2: Start the Desktop Application
-
-Open another terminal and run:
+3. Run database migrations:
 ```bash
-python desktop/main.py
+python scripts/init_db.py
 ```
 
-## Default Login Credentials
+4. Create initial super admin:
+```bash
+python scripts/create_super_admin.py
+```
 
-- **Username**: `admin`
-- **Password**: `admin`
-
-⚠️ **Change these credentials in production!**
-
-## User Roles
-
-- **Admin**: Full access, can manage users and view all data
-- **Researcher**: Can perform measurements and view only their own data
+5. Launch application:
+```bash
+python main.py
+```
 
 ## Project Structure
 
 ```
-TE_Measurement/
-├── app/              # FastAPI backend
-│   ├── api/         # API routes
-│   ├── core/        # Core functionality (config, security)
-│   ├── models/      # Database models
-│   └── schemas/     # Pydantic schemas
-├── desktop/         # Flet desktop application
-│   ├── ui/          # UI components
-│   └── api_client.py # API client
-├── scripts/         # Utility scripts
-└── migrations/      # Database migrations (Alembic)
+TE_Measurements/
+├── main.py                 # Application entry point
+├── config/                 # Configuration files
+├── src/
+│   ├── gui/               # PyQt6 GUI components
+│   ├── models/            # Database models
+│   ├── services/          # Business logic
+│   ├── auth/              # Authentication & authorization
+│   ├── instruments/       # Instrument connection modules
+│   └── utils/             # Utility functions
+├── data/                  # Raw measurement data storage
+├── scripts/               # Database and setup scripts
+└── tests/                 # Unit tests
 ```
 
-## Development
+## User Roles
 
-### Running Tests
-```bash
-pytest
-```
+### Researcher
+- Create and manage workbooks
+- View own measurements (read-only instrument data)
+- Belongs to one lab by default
+- **Cannot create accounts** - accounts are created by super admins
 
-### Database Migrations
-```bash
-# Create a new migration
-alembic revision --autogenerate -m "Description"
+### Lab Admin
+- View all researchers' work in their lab
+- Comment on researchers' work
+- View statistics and analytics
+- Cannot edit or delete data
+- **Cannot create accounts** - accounts are created by super admins
 
-# Apply migrations
-alembic upgrade head
-```
+### Super Admin
+- Manage labs, lab admins, and researchers
+- **Create user accounts** (only role that can create accounts)
+- View system-wide statistics dashboard
+- Access audit logs
+- Full system administration
 
-## Instrument Connections
+## Authentication
 
-See [INSTRUMENT_CONNECTIONS.md](INSTRUMENT_CONNECTIONS.md) for detailed information about Keithley instrument connections and GPIB addresses.
+**Important**: User accounts can only be created by super administrators. Researchers and lab admins cannot create their own accounts. When a super admin creates an account, they will provide the username and password to the user.
 
 ## License
 
-For internal use - Ikeda-Hamasaki Laboratory
+Proprietary - For internal research use only
 
-## Support
-
-For issues or questions, please contact the development team.

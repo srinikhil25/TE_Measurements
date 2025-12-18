@@ -1,119 +1,99 @@
+#!/usr/bin/env python3
 """
-Initialize database and create default admin user.
-Run this script once to set up the database.
+Initialize database - Create all tables
 """
+
 import sys
-from pathlib import Path
+import os
 
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.database import Base, engine, SessionLocal
-from app.models.user import User, UserRole
-from app.models.lab import Lab
-from app.core.security import get_password_hash
+from src.database import init_database, create_tables, Base
 
-def init_db():
-    """Create all tables and default lab/users."""
-    # Create all tables
-    print("Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-    print("Tables created successfully!")
+# Import all models so SQLAlchemy registers them
+from src.models import (
+    User, UserRole,
+    Lab,
+    Workbook,
+    Measurement, MeasurementType,
+    Comment,
+    AuditLog, AuditActionType
+)
+from src.models.associations import user_lab_permissions
+
+
+def main():
+    """Initialize database"""
+    print("Initializing database...")
     
-    # Create default lab and users
-    db = SessionLocal()
     try:
-        # Check if any labs exist
-        existing_lab = db.query(Lab).first()
-        if existing_lab:
-            print("Database already initialized. Skipping creation.")
-            return
+        # Initialize database and get engine
+        db_engine, _ = init_database()
+        print("Database connection established.")
+        # Log basic engine info
+        print(f"Engine URL: {str(db_engine.url)}")
+        
+        print("Creating tables...")
+        print(f"Models registered: {list(Base.metadata.tables.keys())}")
+        create_tables()
+        print("All tables created successfully!")
+        
+        # Verify connection details and tables using SQL / inspector
+        from sqlalchemy import inspect, text  # type: ignore[import]
 
-        # Create default labs
-        default_lab = Lab(
-            lab_name="Ikeda-Hamasaki Laboratory",
-            lab_code="1111",
-            lab_description="IAdvanced Device Research Laboratory",
-        )
-        lab_b = Lab(
-            lab_name="Thermoelectric Materials Lab",
-            lab_code="2222",
-            lab_description="Thermoelectric materials and device development.",
-        )
-        lab_c = Lab(
-            lab_name="Nanostructure Physics Lab",
-            lab_code="3333",
-            lab_description="Nanostructured thermoelectric physics laboratory.",
-        )
-        lab_d = Lab(
-            lab_name="Energy Conversion Lab",
-            lab_code="4444",
-            lab_description="Energy conversion and transport measurements lab.",
-        )
-        db.add_all([default_lab, lab_b, lab_c, lab_d])
-        db.flush()  # assign lab_ids
+        dialect = db_engine.url.get_backend_name()
 
-        # Create super admin (no lab_id)
-        super_admin = User(
-            username="superadmin",
-            email="superadmin@seebeck.local",
-            hashed_password=get_password_hash("superadmin"),
-            full_name="Super Administrator",
-            role=UserRole.SUPER_ADMIN,
-            is_active=True,
-            lab_id=None,
-            created_by=None,
-        )
-        db.add(super_admin)
+        if dialect.startswith("postgresql"):
+            # PostgreSQL-specific connection details
+            with db_engine.connect() as conn:
+                info_row = conn.execute(
+                    text(
+                        """
+                        SELECT
+                            current_database(),
+                            current_user,
+                            inet_server_addr(),
+                            inet_server_port(),
+                            current_schema()
+                        """
+                    )
+                ).fetchone()
 
-        # Create lab admin for default lab
-        lab_admin = User(
-            username="labadmin",
-            email="labadmin@seebeck.local",
-            hashed_password=get_password_hash("labadmin"),
-            full_name="Lab Administrator",
-            role=UserRole.LAB_ADMIN,
-            is_active=True,
-            lab_id=default_lab.lab_id,
-            created_by=super_admin.id,
-        )
-        db.add(lab_admin)
+            db_name, db_user, db_host, db_port, db_schema = info_row
+            print(
+                "\nConnection details:"
+                f"\n  current_database = {db_name}"
+                f"\n  current_user     = {db_user}"
+                f"\n  inet_server_addr = {db_host}"
+                f"\n  inet_server_port = {db_port}"
+                f"\n  current_schema   = {db_schema}"
+            )
+        else:
+            # Generic info for non-PostgreSQL (e.g. SQLite)
+            print(f"\nConnection details: dialect = {dialect}, URL = {db_engine.url}")
 
-        # Create researcher for default lab
-        researcher_user = User(
-            username="researcher",
-            email="researcher@seebeck.local",
-            hashed_password=get_password_hash("researcher"),
-            full_name="Test Researcher",
-            role=UserRole.RESEARCHER,
-            is_active=True,
-            lab_id=default_lab.lab_id,
-            created_by=lab_admin.id,
-        )
-        db.add(researcher_user)
-
-        db.commit()
-        print("Default labs and users created successfully!")
-        print("\nLabs:")
-        for lab in [default_lab, lab_b, lab_c, lab_d]:
-            print(f"  lab_id: {lab.lab_id} | lab_name: {lab.lab_name} | lab_code: {lab.lab_code}")
-        print("\nSuper Admin User:")
-        print("  Username: superadmin")
-        print("  Password: superadmin")
-        print("\nLab Admin User:")
-        print("  Username: labadmin")
-        print("  Password: labadmin")
-        print("\nResearcher User:")
-        print("  Username: researcher")
-        print("  Password: researcher")
-        print("\n⚠️  IMPORTANT: Change the default passwords in production!")
+        # Verify tables were created (introspection works for both)
+        inspector = inspect(db_engine)
+        tables = inspector.get_table_names()
+        print(f"\nTables in database (via inspector): {tables}")
+        
+        if tables:
+            print(f"\n✅ Successfully created {len(tables)} table(s):")
+            for table in sorted(tables):
+                print(f"   - {table}")
+        else:
+            print("\n⚠️  Warning: No tables found in database!")
+        
+        print("\nDatabase initialization complete!")
+        
     except Exception as e:
-        db.rollback()
-        print(f"Error creating admin user: {e}")
-    finally:
-        db.close()
+        print(f"Error initializing database: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    init_db()
+    main()
 

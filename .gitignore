@@ -30,27 +30,35 @@ ENV/
 .idea/
 *.swp
 *.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Project specific
-*.csv
-*.xlsx
-*.log
-*.png
-*.jpg
-*.jpeg
-!assets/logo.png
-!assets/logo.jpg
-!assets/logo.jpeg
+*~
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Environment
+# Logs
+logs/
+*.log
+
+# Data files
+data/raw/
+data/backup/
+*.csv
+*.xlsx
+*.dat
+
+# Configuration (sensitive)
+config/config.ini
 .env
-.env.local
+*.key
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Application specific
+temp/
+cache/
+
