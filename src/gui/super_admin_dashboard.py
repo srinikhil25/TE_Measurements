@@ -1,7 +1,17 @@
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QTabWidget, QMessageBox,
-    QGroupBox, QFormLayout, QLineEdit, QComboBox
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QMessageBox,
+    QGroupBox,
+    QFormLayout,
+    QLineEdit,
+    QComboBox,
 )
 from PyQt6.QtCore import Qt
 
@@ -11,6 +21,8 @@ from src.models import Lab, User, UserRole, AuditLog, AuditActionType
 from src.services.statistics_service import StatisticsService
 from src.gui.dialogs.create_user_dialog import CreateUserDialog
 from src.gui.dialogs.create_lab_dialog import CreateLabDialog
+from src.gui.dialogs.edit_user_dialog import EditUserDialog
+from src.gui.lab_profile_window import LabProfileWindow
 
 
 class SuperAdminDashboard(BaseDashboard):
@@ -19,6 +31,8 @@ class SuperAdminDashboard(BaseDashboard):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.statistics_service = StatisticsService()
+        self.lab_profile_windows: list[LabProfileWindow] = []
+        self.stats_label: QLabel | None = None
         self.init_ui()
     
     def _create_role_badge(self):
@@ -66,9 +80,10 @@ class SuperAdminDashboard(BaseDashboard):
         layout = QVBoxLayout()
         
         # System statistics
-        stats_label = QLabel("System-wide statistics will be displayed here")
-        stats_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(stats_label)
+        self.stats_label = QLabel("")
+        self.stats_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.stats_label.setStyleSheet("color: #444; font-size: 11px;")
+        layout.addWidget(self.stats_label)
         
         # Instrument usage table
         usage_group = QGroupBox("Instrument Usage Logs (Most Recent First)")
@@ -178,8 +193,50 @@ class SuperAdminDashboard(BaseDashboard):
     
     def load_statistics(self):
         """Load system statistics"""
-        # TODO: Implement comprehensive statistics
-        pass
+        db = next(get_db())
+        try:
+            stats = self.statistics_service.get_system_statistics(db)
+            logs = self.statistics_service.get_instrument_usage_logs(db, limit=200)
+
+            if self.stats_label is not None:
+                self.stats_label.setText(
+                    " | ".join(
+                        [
+                            f"Users: {stats.get('total_users', 0)}",
+                            f"Researchers: {stats.get('total_researchers', 0)}",
+                            f"Labs: {stats.get('total_labs', 0)}",
+                            f"Workbooks: {stats.get('total_workbooks', 0)}",
+                            f"Measurements: {stats.get('total_measurements', 0)}",
+                            f"Instrument uses (30 days): {stats.get('recent_instrument_usage', 0)}",
+                        ]
+                    )
+                )
+
+            # Populate instrument usage table
+            self.usage_table.setRowCount(len(logs))
+            for row, log in enumerate(logs):
+                user_name = log.user.username if log.user else "System"
+                action = log.action_type.value.replace("_", " ").title()
+                time_str = (
+                    log.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                    if log.created_at
+                    else ""
+                )
+                entity = log.entity_type or ""
+                details = log.description or ""
+
+                self.usage_table.setItem(row, 0, QTableWidgetItem(user_name))
+                self.usage_table.setItem(row, 1, QTableWidgetItem(action))
+                self.usage_table.setItem(row, 2, QTableWidgetItem(time_str))
+                self.usage_table.setItem(row, 3, QTableWidgetItem(entity))
+                self.usage_table.setItem(row, 4, QTableWidgetItem(details))
+
+            self.usage_table.resizeColumnsToContents()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load statistics: {str(e)}")
+        finally:
+            db.close()
     
     def load_labs(self):
         """Load labs table"""
@@ -199,9 +256,11 @@ class SuperAdminDashboard(BaseDashboard):
                 self.labs_table.setItem(row, 3, QTableWidgetItem(str(member_count)))
                 
                 # Actions
-                edit_button = QPushButton("Edit")
-                edit_button.clicked.connect(lambda checked, lab_id=lab.id: self.edit_lab(lab_id))
-                self.labs_table.setCellWidget(row, 4, edit_button)
+                view_button = QPushButton("Open")
+                view_button.clicked.connect(
+                    lambda checked, lab_id=lab.id: self.open_lab_profile(lab_id)
+                )
+                self.labs_table.setCellWidget(row, 4, view_button)
             
             self.labs_table.resizeColumnsToContents()
         except Exception as e:
@@ -288,11 +347,15 @@ class SuperAdminDashboard(BaseDashboard):
                 f"Please provide the credentials to the user."
             )
     
-    def edit_lab(self, lab_id):
-        """Edit a lab"""
-        QMessageBox.information(self, "Info", f"Edit lab {lab_id} dialog will be implemented")
+    def open_lab_profile(self, lab_id: int):
+        """Open a lab profile window showing admins and researchers."""
+        window = LabProfileWindow(lab_id, self)
+        window.show()
+        self.lab_profile_windows.append(window)
     
     def edit_user(self, user_id):
-        """Edit a user"""
-        QMessageBox.information(self, "Info", f"Edit user {user_id} dialog will be implemented")
+        """Open dialog to edit a user and refresh table on success."""
+        dialog = EditUserDialog(user_id, self)
+        if dialog.exec() == dialog.DialogCode.Accepted:
+            self.load_users()
 

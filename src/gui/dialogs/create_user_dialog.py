@@ -1,9 +1,20 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QFormLayout, QComboBox, QMessageBox, QTextEdit
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QFormLayout,
+    QComboBox,
+    QMessageBox,
+    QTextEdit,
+    QApplication,
 )
 from PyQt6.QtCore import Qt
 from sqlalchemy.orm import Session
+import secrets
+import string
 
 from src.database import get_db
 from src.models import User, UserRole, Lab
@@ -12,11 +23,18 @@ from src.auth import AuthManager
 
 class CreateUserDialog(QDialog):
     """Dialog for super admins to create new users"""
-    
-    def __init__(self, parent=None):
+
+    def __init__(
+        self,
+        parent=None,
+        preset_role: UserRole | None = None,
+        preset_lab_id: int | None = None,
+    ):
         super().__init__(parent)
         self.auth_manager = AuthManager()
         self.created_user = None
+        self._preset_role = preset_role
+        self._preset_lab_id = preset_lab_id
         self.init_ui()
     
     def init_ui(self):
@@ -59,25 +77,16 @@ class CreateUserDialog(QDialog):
         self.role_combo = QComboBox()
         self.role_combo.addItems(["Researcher", "Lab Admin", "Super Admin"])
         form_layout.addRow("Role *:", self.role_combo)
-        
+
         # Lab (for researchers and lab admins)
         self.lab_combo = QComboBox()
         self.lab_combo.addItem("Select Lab", None)
         self.load_labs()
         form_layout.addRow("Lab *:", self.lab_combo)
         
-        # Password
-        self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Enter password (min 8 characters)")
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        form_layout.addRow("Password *:", self.password_input)
-        
-        # Confirm Password
-        self.confirm_password_input = QLineEdit()
-        self.confirm_password_input.setPlaceholderText("Confirm password")
-        self.confirm_password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        form_layout.addRow("Confirm Password *:", self.confirm_password_input)
-        
+        # Apply any presets for role/lab after combos are populated
+        self._apply_presets()
+
         layout.addLayout(form_layout)
         
         # Buttons
@@ -106,6 +115,29 @@ class CreateUserDialog(QDialog):
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
+
+    def _apply_presets(self):
+        """Apply optional preset role/lab (used from lab profile window)."""
+        if self._preset_role is not None:
+            role_text_map = {
+                UserRole.RESEARCHER: "Researcher",
+                UserRole.LAB_ADMIN: "Lab Admin",
+                UserRole.SUPER_ADMIN: "Super Admin",
+            }
+            text = role_text_map.get(self._preset_role)
+            if text:
+                index = self.role_combo.findText(text)
+                if index >= 0:
+                    self.role_combo.setCurrentIndex(index)
+                    # Lock role to avoid accidental change
+                    self.role_combo.setEnabled(False)
+
+        if self._preset_lab_id is not None:
+            index = self.lab_combo.findData(self._preset_lab_id)
+            if index >= 0:
+                self.lab_combo.setCurrentIndex(index)
+                # Lock lab to keep user tied to this lab
+                self.lab_combo.setEnabled(False)
     
     def load_labs(self):
         """Load available labs"""
@@ -120,27 +152,21 @@ class CreateUserDialog(QDialog):
             db.close()
     
     def create_user(self):
-        """Create the user"""
+        """Create the user.
+
+        Password is generated automatically as a unique, random
+        alphanumeric string (8–16 chars). Super admin never types it.
+        """
         # Validate inputs
         full_name = self.full_name_input.text().strip()
         username = self.username_input.text().strip()
         email = self.email_input.text().strip()
-        password = self.password_input.text()
-        confirm_password = self.confirm_password_input.text()
         role_text = self.role_combo.currentText()
         lab_id = self.lab_combo.currentData()
         
         # Validation
-        if not all([full_name, username, email, password]):
+        if not all([full_name, username, email]):
             QMessageBox.warning(self, "Validation Error", "Please fill in all required fields")
-            return
-        
-        if password != confirm_password:
-            QMessageBox.warning(self, "Validation Error", "Passwords do not match")
-            return
-        
-        if len(password) < 8:
-            QMessageBox.warning(self, "Validation Error", "Password must be at least 8 characters")
             return
         
         # Map role text to enum
@@ -170,6 +196,9 @@ class CreateUserDialog(QDialog):
             if existing_email:
                 QMessageBox.warning(self, "Error", f"Email '{email}' is already registered")
                 return
+
+            # Generate a unique random password (8–16 chars, alphanumeric)
+            password = self._generate_unique_password(db)
             
             # Create new user
             new_user = User(
@@ -187,16 +216,34 @@ class CreateUserDialog(QDialog):
             db.refresh(new_user)
             
             self.created_user = new_user
-            
-            QMessageBox.information(
-                self,
-                "Success",
-                f"User '{username}' created successfully!\n\n"
-                f"Please provide these credentials to the user:\n"
-                f"Username: {username}\n"
-                f"Password: {password}"
+
+            # Enhanced success dialog with styled credentials and copy support
+            msg = QMessageBox(self)
+            msg.setWindowTitle("User Created")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setTextFormat(Qt.TextFormat.RichText)
+            msg.setText(
+                "<b>User '{username}' created successfully.</b><br><br>"
+                "<span style='color:#555;'>Provide these credentials to the user. "
+                "<b>The password will only be shown once.</b></span><br><br>"
+                "<table style='font-size:12px;'>"
+                "<tr><td align='right'><b>Username:&nbsp;</b></td>"
+                "<td><code style='background-color:#f5f5f5; padding:2px 6px;'>{username}</code></td></tr>"
+                "<tr><td align='right'><b>Password:&nbsp;</b></td>"
+                "<td><code style='background-color:#fff3cd; padding:2px 6px;'>{password}</code></td></tr>"
+                "</table>"
+            .format(username=username, password=password)
             )
-            
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            copy_btn = msg.addButton(
+                "Copy Password", QMessageBox.ButtonRole.ActionRole
+            )
+
+            msg.exec()
+
+            if msg.clickedButton() == copy_btn:
+                QApplication.clipboard().setText(password)
+
             self.accept()
             
         except Exception as e:
@@ -204,4 +251,22 @@ class CreateUserDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to create user: {str(e)}")
         finally:
             db.close()
+
+    def _generate_unique_password(self, db: Session, min_len: int = 8, max_len: int = 16) -> str:
+        """Generate a unique, random alphanumeric password.
+
+        Ensures (with extremely high probability) that no existing user's
+        password matches by checking against all stored password hashes.
+        """
+        alphabet = string.ascii_letters + string.digits
+        length_range = list(range(min_len, max_len + 1))
+
+        while True:
+            length = secrets.choice(length_range)
+            candidate = "".join(secrets.choice(alphabet) for _ in range(length))
+
+            # Check uniqueness vs existing users' passwords
+            users = db.query(User).all()
+            if all(not u.check_password(candidate) for u in users):
+                return candidate
 

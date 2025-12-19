@@ -10,8 +10,11 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QSizePolicy,
+    QToolButton,
+    QMenu,
 )
 from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QAction
 
 from sqlalchemy import func
 from datetime import datetime
@@ -20,7 +23,8 @@ from src.gui.base_dashboard import BaseDashboard
 from src.database import get_db
 from src.models import Workbook
 from src.services.workbook_service import WorkbookService
-
+from src.gui.workbook_window import WorkbookWindow
+from src.i18n import tr
 
 class ResearcherDashboard(BaseDashboard):
     """Dashboard for researchers"""
@@ -33,11 +37,12 @@ class ResearcherDashboard(BaseDashboard):
         self.card_widgets: list[QFrame] = []
         self.cards_layout: QGridLayout | None = None
         self.search_input: QLineEdit | None = None
+        self.open_workbook_windows: list[WorkbookWindow] = []
         self.init_ui()
     
     def _create_role_badge(self):
         """Create role badge for researcher"""
-        badge = QLabel("Researcher")
+        badge = QLabel(tr("dashboard.researcher"))
         badge.setStyleSheet("""
             QLabel {
                 background-color: #17a2b8;
@@ -61,17 +66,17 @@ class ResearcherDashboard(BaseDashboard):
         # Toolbar: search + refresh
         toolbar = QHBoxLayout()
 
-        search_label = QLabel("Search workbooks:")
+        self.search_label_ref = QLabel(tr("researcher.search_workbooks"))
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Type workbook name...")
+        self.search_input.setPlaceholderText(tr("researcher.search_placeholder"))
         self.search_input.textChanged.connect(self._apply_filter)
 
-        toolbar.addWidget(search_label)
+        toolbar.addWidget(self.search_label_ref)
         toolbar.addWidget(self.search_input)
 
-        refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.load_data)
-        toolbar.addWidget(refresh_button)
+        self.refresh_button_ref = QPushButton(tr("researcher.refresh"))
+        self.refresh_button_ref.clicked.connect(self.load_data)
+        toolbar.addWidget(self.refresh_button_ref)
 
         toolbar.addStretch()
 
@@ -107,9 +112,24 @@ class ResearcherDashboard(BaseDashboard):
         )
         self._build_cards()
     
+    def _refresh_translated_ui(self):
+        """Refresh all translated UI elements with current language"""
+        if hasattr(self, 'search_label_ref') and self.search_label_ref:
+            self.search_label_ref.setText(tr("researcher.search_workbooks"))
+        if hasattr(self, 'refresh_button_ref') and self.refresh_button_ref:
+            self.refresh_button_ref.setText(tr("researcher.refresh"))
+        if hasattr(self, 'search_input') and self.search_input:
+            self.search_input.setPlaceholderText(tr("researcher.search_placeholder"))
+        
+        # Rebuild cards to refresh translated text in cards
+        self._build_cards()
+    
     def load_data(self):
         """Load researcher's workbooks and rebuild card grid"""
         super().load_data()  # Update header
+        
+        # Refresh translated UI elements after login (language may have changed)
+        self._refresh_translated_ui()
 
         user = self.get_current_user()
         if not user:
@@ -131,7 +151,7 @@ class ResearcherDashboard(BaseDashboard):
                 .all()
             )
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load workbooks: {str(e)}")
+            QMessageBox.critical(self, tr("common.error"), f"Failed to load workbooks: {str(e)}")
             self.workbooks_all = []
         finally:
             db.close()
@@ -232,7 +252,7 @@ class ResearcherDashboard(BaseDashboard):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
 
-        title = QLabel("+ New Workbook")
+        title = QLabel(tr("researcher.new_workbook"))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_font = title.font()
         title_font.setPointSize(12)
@@ -240,14 +260,14 @@ class ResearcherDashboard(BaseDashboard):
         title.setFont(title_font)
         layout.addWidget(title)
 
-        subtitle = QLabel("Create a new experiment for a sample.")
+        subtitle = QLabel(tr("researcher.new_workbook_subtitle"))
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet("color: #666; font-size: 11px;")
         layout.addWidget(subtitle)
 
         layout.addStretch()
 
-        button = QPushButton("Create Workbook")
+        button = QPushButton(tr("researcher.create_workbook"))
         button.setMinimumHeight(32)
         button.setStyleSheet(
             """
@@ -298,7 +318,7 @@ class ResearcherDashboard(BaseDashboard):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(6)
 
-        # Editable title field styled as a label
+        # Header row: editable title + overflow menu (three vertical dots)
         title_edit = QLineEdit(workbook.title or "Untitled Workbook")
         title_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_edit.setFrame(False)
@@ -322,19 +342,60 @@ class ResearcherDashboard(BaseDashboard):
                 wb_id, editor
             )
         )
-        layout.addWidget(title_edit)
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(4)
+        header_row.addWidget(title_edit, 1)
+
+        # Three-dot overflow button for workbook actions (e.g., delete)
+        options_button = QToolButton(card)
+        options_button.setText("⋮")
+        options_button.setToolTip("More options")
+        options_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        options_button.setStyleSheet(
+            """
+            QToolButton {
+                border: none;
+                font-weight: bold;
+                color: #888;
+                padding: 0 2px;
+            }
+            QToolButton::menu-indicator {
+                image: none;
+            }
+            QToolButton:hover {
+                color: #000;
+            }
+            """
+        )
+
+        menu = QMenu(options_button)
+        delete_action = QAction(tr("researcher.delete_workbook"), options_button)
+        delete_action.triggered.connect(
+            lambda _=False, wb_id=workbook.id, wb_title=workbook.title: self.confirm_delete_workbook(
+                wb_id, wb_title or "Untitled Workbook"
+            )
+        )
+        menu.addAction(delete_action)
+        options_button.setMenu(menu)
+
+        header_row.addWidget(
+            options_button, 0, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+        )
+        layout.addLayout(header_row)
 
         if workbook.sample_name:
-            sample_label = QLabel(f"Sample: {workbook.sample_name}")
+            sample_label = QLabel(f"{tr('researcher.sample')} {workbook.sample_name}")
             sample_label.setStyleSheet("color: #555; font-size: 11px;")
             layout.addWidget(sample_label)
 
         dates = []
         if workbook.created_at:
-            dates.append(f"Created: {workbook.created_at.strftime('%Y-%m-%d %H:%M')}")
+            dates.append(f"{tr('researcher.created')} {workbook.created_at.strftime('%Y-%m-%d %H:%M')}")
         if workbook.last_measurement_at:
             dates.append(
-                f"Last measurement: {workbook.last_measurement_at.strftime('%Y-%m-%d %H:%M')}"
+                f"{tr('researcher.last_measurement')} {workbook.last_measurement_at.strftime('%Y-%m-%d %H:%M')}"
             )
 
         if dates:
@@ -345,7 +406,7 @@ class ResearcherDashboard(BaseDashboard):
 
         layout.addStretch()
 
-        open_button = QPushButton("Open Workbook")
+        open_button = QPushButton(tr("researcher.open_workbook"))
         open_button.setMinimumHeight(28)
         open_button.setStyleSheet(
             """
@@ -385,11 +446,11 @@ class ResearcherDashboard(BaseDashboard):
                 db, user, title="Untitled Workbook", sample_name=None, sample_id=None
             )
             QMessageBox.information(
-                self, "Workbook Created", f"Created workbook '{wb.title}'."
+                self, tr("researcher.workbook_created"), tr("researcher.created_message", "Created workbook '{title}'.").format(title=wb.title)
             )
         except Exception as e:
             db.rollback()
-            QMessageBox.critical(self, "Error", f"Failed to create workbook: {str(e)}")
+            QMessageBox.critical(self, tr("common.error"), f"Failed to create workbook: {str(e)}")
         finally:
             db.close()
 
@@ -397,8 +458,11 @@ class ResearcherDashboard(BaseDashboard):
     
     def open_workbook_by_id(self, workbook_id):
         """Open workbook by ID"""
-        # TODO: Implement workbook viewer/editor with 3 tabs (Seebeck, Resistivity, Thermal Conductivity)
-        QMessageBox.information(self, "Info", f"Opening workbook {workbook_id} - Will show 3 measurement pages")
+        # Open workbook as a separate, maximized window
+        window = WorkbookWindow(workbook_id, None)
+        window.showMaximized()
+        # Keep reference so it's not garbage-collected
+        self.open_workbook_windows.append(window)
 
     def inline_rename_workbook(self, workbook_id: int, editor: QLineEdit):
         """Inline rename handler for title edit field."""
@@ -420,7 +484,42 @@ class ResearcherDashboard(BaseDashboard):
             db.commit()
         except Exception as e:
             db.rollback()
-            QMessageBox.critical(self, "Error", f"Failed to rename workbook: {str(e)}")
+            QMessageBox.critical(self, tr("common.error"), f"Failed to rename workbook: {str(e)}")
+        finally:
+            db.close()
+
+        self.load_data()
+
+    def confirm_delete_workbook(self, workbook_id: int, title: str):
+        """Ask for confirmation and soft-delete the workbook via service."""
+        user = self.get_current_user()
+        if not user:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            tr("researcher.delete_workbook"),
+            (
+                f"{tr('researcher.delete_confirm')} '{title}'?\n\n"
+                f"{tr('researcher.delete_confirm_detail')}"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        db = next(get_db())
+        try:
+            self.workbook_service.delete_workbook(db, workbook_id, user)
+        except PermissionError as e:
+            QMessageBox.warning(self, tr("common.warning"), str(e))
+        except Exception as e:
+            db.rollback()
+            QMessageBox.critical(
+                self, tr("common.error"), f"Failed to delete workbook: {str(e)}"
+            )
         finally:
             db.close()
 

@@ -18,8 +18,9 @@ class CurrentSession:
         """Set current user"""
         self._user = user
         # When user is set, prefer their language setting if available
-        if getattr(user, "preferred_language", None):
+        if hasattr(user, "preferred_language") and user.preferred_language:
             self._language = user.preferred_language
+            print(f"[Session] Set language to: {self._language} for user: {user.username}")
     
     def get_user(self) -> Optional[User]:
         """Get current user"""

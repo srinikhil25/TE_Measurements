@@ -9,6 +9,7 @@ from PyQt6.QtGui import QFont
 
 from src.auth import SessionManager
 from src.models import User
+from src.i18n import tr
 
 
 class BaseDashboard(QWidget):
@@ -48,7 +49,7 @@ class BaseDashboard(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         
         # Welcome label (will be updated when user loads)
-        self.welcome_label = QLabel("Welcome")
+        self.welcome_label = QLabel(tr("dashboard.welcome"))
         welcome_font = QFont()
         welcome_font.setPointSize(16)
         welcome_font.setBold(True)
@@ -56,9 +57,8 @@ class BaseDashboard(QWidget):
         header_layout.addWidget(self.welcome_label)
         
         # Role badge (optional, can be overridden)
-        self.role_badge = self._create_role_badge()
-        if self.role_badge:
-            header_layout.addWidget(self.role_badge)
+        # Will be created/refreshed in update_header() after login
+        self.role_badge = None
         
         header_layout.addStretch()
         
@@ -68,8 +68,8 @@ class BaseDashboard(QWidget):
         header_layout.addWidget(self.user_info_label)
         
         # Logout button
-        logout_button = QPushButton("Logout")
-        logout_button.setStyleSheet("""
+        self.logout_button = QPushButton(tr("dashboard.logout"))
+        self.logout_button.setStyleSheet("""
             QPushButton {
                 background-color: #dc3545;
                 color: white;
@@ -81,8 +81,8 @@ class BaseDashboard(QWidget):
                 background-color: #c82333;
             }
         """)
-        logout_button.clicked.connect(self.logout_requested.emit)
-        header_layout.addWidget(logout_button)
+        self.logout_button.clicked.connect(self.logout_requested.emit)
+        header_layout.addWidget(self.logout_button)
         
         header_widget.setLayout(header_layout)
         return header_widget
@@ -114,7 +114,24 @@ class BaseDashboard(QWidget):
         user = self.session_manager.get_current_user()
         if user:
             self.current_user = user
-            self.welcome_label.setText(f"Welcome, {user.full_name}")
+            # Translate welcome message with user's name
+            welcome_text = tr("dashboard.welcome")
+            self.welcome_label.setText(f"{welcome_text}, {user.full_name}")
+
+            # Update role badge with translated text
+            if self.role_badge:
+                # Remove old badge
+                self.role_badge.setParent(None)
+            self.role_badge = self._create_role_badge()
+            if self.role_badge:
+                # Find the header layout and insert badge after welcome label
+                header_layout = self.header_widget.layout()
+                if header_layout:
+                    header_layout.insertWidget(1, self.role_badge)
+
+            # Update logout button text
+            if hasattr(self, 'logout_button') and self.logout_button:
+                self.logout_button.setText(tr("dashboard.logout"))
 
             # For now, only show the role in the header to avoid lazy-loading
             # relationships (like user.lab) on detached instances.

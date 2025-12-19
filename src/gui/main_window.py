@@ -7,6 +7,7 @@ from src.gui.lab_admin_dashboard import LabAdminDashboard
 from src.gui.super_admin_dashboard import SuperAdminDashboard
 from src.models import UserRole
 from src.auth import SessionManager, AuthManager
+from src.i18n import set_session_manager
 
 
 class MainWindow(QMainWindow):
@@ -16,6 +17,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.session_manager = SessionManager()
         self.auth_manager = AuthManager()
+        
+        # Initialize translation system with session manager
+        set_session_manager(self.session_manager)
 
         self.setWindowTitle("TE Measurements")
         self.setMinimumSize(1200, 800)
