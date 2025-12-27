@@ -100,3 +100,20 @@ class Config:
     def retry_attempts(self):
         return self._config.getint('instruments', 'retry_attempts', fallback=3)
 
+    # --- Instrument addresses (per-device) ---
+    @property
+    def addr_2182a(self):
+        return self._config.get('instruments', 'addr_2182a', fallback='GPIB0::7::INSTR')
+
+    @property
+    def addr_2700(self):
+        return self._config.get('instruments', 'addr_2700', fallback='GPIB0::16::INSTR')
+
+    @property
+    def addr_pk160(self):
+        return self._config.get('instruments', 'addr_pk160', fallback='GPIB0::15::INSTR')
+
+    @property
+    def addr_2401(self):
+        return self._config.get('instruments', 'addr_2401', fallback='GPIB0::24::INSTR')
+

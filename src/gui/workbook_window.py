@@ -13,6 +13,8 @@ from PyQt6.QtCore import Qt
 
 from src.database import get_db
 from src.models import Workbook, Measurement, MeasurementType
+from src.instruments.keithley_connection import KeithleyConnection
+from src.gui.seebeck_tab import SeebeckTab
 
 
 class WorkbookWindow(QMainWindow):
@@ -22,6 +24,7 @@ class WorkbookWindow(QMainWindow):
         super().__init__(parent)
         self.workbook_id = workbook_id
         self.workbook: Workbook | None = None
+        self.keithley = KeithleyConnection()
 
         self._init_ui()
         self._load_data()
@@ -60,10 +63,8 @@ class WorkbookWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabPosition(QTabWidget.TabPosition.South)
 
-        # Seebeck tab
-        self.seebeck_tab = self._create_measurement_tab(
-            "Seebeck Measurement", MeasurementType.SEEBECK
-        )
+        # Seebeck tab (dedicated widget)
+        self.seebeck_tab = SeebeckTab(self.keithley, self)
         self.tab_widget.addTab(self.seebeck_tab, "Seebeck")
 
         # Electrical resistivity tab
@@ -91,6 +92,7 @@ class WorkbookWindow(QMainWindow):
         vbox.setContentsMargins(8, 8, 8, 8)
         vbox.setSpacing(8)
 
+        # Title for generic tabs
         header = QLabel(title)
         header_font = header.font()
         header_font.setPointSize(12)
@@ -98,7 +100,7 @@ class WorkbookWindow(QMainWindow):
         header.setFont(header_font)
         vbox.addWidget(header)
 
-        # Placeholder description
+        # Simple placeholder description and table (for resistivity / thermal, to be expanded later)
         desc = QLabel(
             "This page will display measurement data and controls for this "
             "measurement type.\nData is read-only once acquired from the instrument."
@@ -107,7 +109,6 @@ class WorkbookWindow(QMainWindow):
         desc.setWordWrap(True)
         vbox.addWidget(desc)
 
-        # Simple table placeholder for data
         table = QTableWidget()
         table.setObjectName(f"table_{measurement_type.value}")
         table.setColumnCount(4)
