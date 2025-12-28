@@ -345,6 +345,18 @@ class Keithley2401:
             logger.error("Failed to turn off 2401 output: %s", e)
             return False
 
+    def set_voltage(self, voltage: float) -> bool:
+        """Set the output voltage level"""
+        if not self.connected:
+            return False
+        try:
+            self.instrument.write(f":SOUR:VOLT:LEV {voltage}")
+            logger.info("2401 set voltage: %s V", voltage)
+            return True
+        except Exception as e:  # pragma: no cover
+            logger.error("Failed to set voltage on 2401: %s", e)
+            return False
+
     def read_measurement(self) -> Optional[Dict[str, float]]:
         if not self.connected:
             return None
@@ -699,19 +711,179 @@ class SeebeckSessionManager:
                 self.system.disconnect_all()
 
 
+class IVSweepSessionManager:
+    """
+    Threaded I-V sweep session for resistivity measurements.
+    
+    Performs voltage sweep and collects I-V data points.
+    """
+
+    def __init__(self, system: Optional[SeebeckSystem] = None):
+        self.system = system or SeebeckSystem()
+        self.session_active = False
+        self.session_thread: Optional[threading.Thread] = None
+        self.session_data: List[Dict[str, Any]] = []
+        self.session_status: str = "idle"
+        self.session_params: Optional[Dict[str, Any]] = None
+        self.session_start_time: Optional[float] = None
+        self.lock = threading.Lock()
+
+    def start_session(self, params: Dict[str, Any]) -> bool:
+        """Start I-V sweep session"""
+        if self.session_active:
+            return False
+        self.session_active = True
+        self.session_data = []
+        self.session_status = "running"
+        self.session_params = params
+        self.session_start_time = time.time()
+        self.session_thread = threading.Thread(
+            target=self._run_sweep, args=(params,), daemon=True
+        )
+        self.session_thread.start()
+        return True
+
+    def stop_session(self) -> None:
+        """Stop I-V sweep session"""
+        self.session_active = False
+        self.session_status = "stopped"
+        if self.session_thread and self.session_thread.is_alive():
+            self.session_thread.join(timeout=2.0)
+        try:
+            if self.system.k2401.connected:
+                self.system.k2401.output_off()
+        finally:
+            # Don't disconnect all - other instruments might be in use
+            pass
+
+    def get_data(self) -> List[Dict[str, Any]]:
+        """Get collected I-V data"""
+        with self.lock:
+            return list(self.session_data)
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get session status"""
+        return {
+            "active": self.session_active,
+            "status": self.session_status,
+            "params": self.session_params,
+            "start_time": self.session_start_time,
+            "data_count": len(self.session_data),
+        }
+
+    def _run_sweep(self, params: Dict[str, Any]) -> None:
+        """Run I-V sweep in background thread"""
+        try:
+            # Connect to 2401 if not already connected
+            if not self.system.k2401.connected:
+                statuses = self.system.connect_all()
+                if not self.system.k2401.connected:
+                    self.session_status = "error: Failed to connect to Keithley 2401"
+                    self.session_active = False
+                    return
+
+            start_voltage = float(params["start_voltage"])
+            stop_voltage = float(params["stop_voltage"])
+            points = int(params["points"])
+            delay_ms = float(params.get("delay_ms", 50.0))
+            current_limit = float(params.get("current_limit", 0.1))
+            voltage_limit = float(params.get("voltage_limit", 21.0))
+            length = params.get("length")
+            width = params.get("width")
+            thickness = params.get("thickness")
+
+            if points < 2:
+                self.session_status = "error: points must be >= 2"
+                self.session_active = False
+                return
+
+            # Calculate voltage steps
+            step = (stop_voltage - start_voltage) / (points - 1)
+            voltages = [start_voltage + i * step for i in range(points)]
+
+            # Configure 2401
+            vmax = max(abs(start_voltage), abs(stop_voltage), abs(voltage_limit))
+            if not self.system.k2401.configure_voltage_source(
+                voltage_limit=vmax, current_limit=current_limit
+            ):
+                self.session_status = "error: Failed to configure 2401"
+                self.session_active = False
+                return
+
+            self.system.k2401.output_on()
+
+            # Perform sweep
+            for idx, voltage in enumerate(voltages):
+                if not self.session_active:
+                    break
+
+                # Set voltage
+                self.system.k2401.set_voltage(voltage)
+                time.sleep(delay_ms / 1000.0)
+
+                # Read measurement
+                meas = self.system.k2401.read_measurement()
+                
+                if meas is None:
+                    row = {
+                        "Index": idx + 1,
+                        "Voltage [V]": voltage,
+                        "Current [A]": None,
+                        "Resistance [Ohm]": None,
+                        "Resistivity [Ohm·m]": None,
+                    }
+                else:
+                    v = meas.get("voltage", voltage)
+                    i = meas.get("current")
+                    r = meas.get("resistance")
+
+                    # Calculate resistivity if dimensions provided
+                    resistivity = None
+                    if r is not None and r > 0 and length and width and thickness:
+                        area = width * thickness
+                        if area > 0 and length > 0:
+                            resistivity = r * area / length
+
+                    row = {
+                        "Index": idx + 1,
+                        "Voltage [V]": v,
+                        "Current [A]": i,
+                        "Resistance [Ohm]": r,
+                        "Resistivity [Ohm·m]": resistivity,
+                    }
+
+                with self.lock:
+                    self.session_data.append(row)
+
+            self.system.k2401.output_off()
+            self.session_status = "finished"
+            self.session_active = False
+
+        except Exception as e:  # pragma: no cover
+            logger.exception("I-V sweep failed: %s", e)
+            self.session_status = f"error: {e}"
+            self.session_active = False
+            try:
+                if self.system.k2401.connected:
+                    self.system.k2401.output_off()
+            except:
+                pass
+
+
 class KeithleyConnection:
     """
     High-level facade used by the rest of the application.
 
     - Provides connection-check APIs for UI indicators
     - Exposes Seebeck session manager for async measurements
-    - Exposes resistivity helpers (single-point / sweep can be added)
+    - Exposes I-V sweep session manager for resistivity measurements
     """
 
     def __init__(self):
         self.config = Config()
         self.system = SeebeckSystem(self.config)
         self.seebeck_session = SeebeckSessionManager(self.system)
+        self.iv_sweep_session = IVSweepSessionManager(self.system)
 
     # --- Connection / status helpers for UI ---
 
@@ -764,7 +936,25 @@ class KeithleyConnection:
     def get_seebeck_status(self) -> Dict[str, Any]:
         return self.seebeck_session.get_status()
 
-    # --- Resistivity helpers (single-point for now; I-V sweep to be added) ---
+    # --- I-V Sweep / Resistivity session accessors ---
+
+    def start_iv_sweep_session(self, params: Dict[str, Any]) -> bool:
+        """Start I-V sweep session"""
+        return self.iv_sweep_session.start_session(params)
+
+    def stop_iv_sweep_session(self) -> None:
+        """Stop I-V sweep session"""
+        self.iv_sweep_session.stop_session()
+
+    def get_iv_sweep_data(self) -> List[Dict[str, Any]]:
+        """Get I-V sweep data"""
+        return self.iv_sweep_session.get_data()
+
+    def get_iv_sweep_status(self) -> Dict[str, Any]:
+        """Get I-V sweep status"""
+        return self.iv_sweep_session.get_status()
+
+    # --- Resistivity helpers (single-point) ---
 
     def measure_resistivity_single(
         self,

@@ -116,4 +116,13 @@ class Config:
     @property
     def addr_2401(self):
         return self._config.get('instruments', 'addr_2401', fallback='GPIB0::24::INSTR')
+    
+    # --- IR Camera settings ---
+    @property
+    def ir_camera_dll_path(self):
+        return self._config.get('instruments', 'ir_camera_dll_path', fallback='C:\\IrDirectSDK\\sdk\\x64\\libirimager.dll')
+    
+    @property
+    def ir_camera_config_path(self):
+        return self._config.get('instruments', 'ir_camera_config_path', fallback='C:\\IrDirectSDK\\generic.xml')
 

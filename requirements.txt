@@ -13,10 +13,13 @@ passlib[bcrypt]
 numpy
 pandas
 scipy
+matplotlib
+openpyxl
 
 # Instrument Communication (to be updated with your existing code)
 pyserial
 pyvisa
+opencv-python
 
 # Utilities
 python-dateutil

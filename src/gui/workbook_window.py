@@ -15,6 +15,7 @@ from src.database import get_db
 from src.models import Workbook, Measurement, MeasurementType
 from src.instruments.keithley_connection import KeithleyConnection
 from src.gui.seebeck_tab import SeebeckTab
+from src.gui.resistivity_tab import ResistivityTab
 
 
 class WorkbookWindow(QMainWindow):
@@ -64,13 +65,11 @@ class WorkbookWindow(QMainWindow):
         self.tab_widget.setTabPosition(QTabWidget.TabPosition.South)
 
         # Seebeck tab (dedicated widget)
-        self.seebeck_tab = SeebeckTab(self.keithley, self)
+        self.seebeck_tab = SeebeckTab(self.keithley, self.workbook_id, self)
         self.tab_widget.addTab(self.seebeck_tab, "Seebeck")
 
-        # Electrical resistivity tab
-        self.resistivity_tab = self._create_measurement_tab(
-            "Electrical Resistivity", MeasurementType.RESISTIVITY
-        )
+        # Electrical resistivity tab (dedicated widget)
+        self.resistivity_tab = ResistivityTab(self.keithley, self.workbook_id, self)
         self.tab_widget.addTab(self.resistivity_tab, "Resistivity")
 
         # Thermal conductivity tab
