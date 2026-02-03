@@ -19,6 +19,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 
+# Configure matplotlib for CJK font support before importing
+from src.utils import configure_cjk_fonts
+configure_cjk_fonts()
+
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas

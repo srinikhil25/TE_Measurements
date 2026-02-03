@@ -251,30 +251,35 @@ class IRCameraWidget(QWidget):
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        layout.setSpacing(3)  # Reduced spacing
         
-        # Header
+        # Compact header with title and button
         header = QHBoxLayout()
-        title = QLabel("IR Camera Live Stream / IRカメラライブストリーム")
+        header.setSpacing(6)
+        
+        # Shorter title
+        title = QLabel("IR Camera")
         title_font = title.font()
-        title_font.setPointSize(10)
+        title_font.setPointSize(9)
         title_font.setBold(True)
         title.setFont(title_font)
         header.addWidget(title)
         
         header.addStretch()
         
-        # Connect/Disconnect button
-        self.connect_btn = QPushButton("Connect Camera")
-        self.connect_btn.setFixedHeight(24)
+        # Connect/Disconnect button - more compact
+        self.connect_btn = QPushButton("Connect")
+        self.connect_btn.setFixedHeight(20)
+        self.connect_btn.setFixedWidth(70)
         self.connect_btn.setStyleSheet("""
             QPushButton {
                 background-color: #0078d4;
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 2px 10px;
-                font-size: 11px;
+                border-radius: 3px;
+                padding: 1px 6px;
+                font-size: 9px;
+                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #005a9e;
@@ -285,27 +290,29 @@ class IRCameraWidget(QWidget):
         
         layout.addLayout(header)
         
-        # Image display
+        # Image display - much more compact
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet("""
             QLabel {
                 border: 1px solid #ccc;
-                border-radius: 4px;
+                border-radius: 3px;
                 background-color: #fafafa;
             }
         """)
-        self.image_label.setMinimumHeight(300)
-        self.image_label.setText("No IR stream available\nClick 'Connect Camera' to start")
+        # Reduced minimum height to fit compact layout
+        self.image_label.setMinimumHeight(100)
+        self.image_label.setMaximumHeight(130)
+        self.image_label.setText("No stream\nClick 'Connect'")
         self.image_label.setWordWrap(True)
         self.image_label.mouseMoveEvent = self._on_mouse_move
         self.image_label.leaveEvent = self._on_mouse_leave
         layout.addWidget(self.image_label)
         
-        # Temperature stats
-        self.stats_label = QLabel("Avg: --°C  |  Min: --°C  |  Max: --°C")
+        # Temperature stats - more compact, single line
+        self.stats_label = QLabel("Avg: --°C | Min: --°C | Max: --°C")
         self.stats_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.stats_label.setStyleSheet("color: #444; font-size: 12px; font-weight: 600;")
+        self.stats_label.setStyleSheet("color: #444; font-size: 9px; font-weight: 500; padding: 2px;")
         layout.addWidget(self.stats_label)
         
         # Tooltip label (overlay)
@@ -344,8 +351,8 @@ class IRCameraWidget(QWidget):
         self.camera_thread.frame_ready.connect(self._on_frame_ready)
         self.camera_thread.start_capture()
         
-        self.connect_btn.setText("Disconnect Camera")
-        self.image_label.setText("Connecting to IR camera...")
+        self.connect_btn.setText("Disconnect")
+        self.image_label.setText("Connecting...")
     
     def _disconnect_camera(self):
         """Stop camera capture"""
@@ -353,9 +360,9 @@ class IRCameraWidget(QWidget):
             self.camera_thread.stop_capture()
             self.camera_thread = None
         
-        self.connect_btn.setText("Connect Camera")
-        self.image_label.setText("No IR stream available\nClick 'Connect Camera' to start")
-        self.stats_label.setText("Avg: --°C  |  Min: --°C  |  Max: --°C")
+        self.connect_btn.setText("Connect")
+        self.image_label.setText("No stream\nClick 'Connect'")
+        self.stats_label.setText("Avg: --°C | Min: --°C | Max: --°C")
         self.current_temps = None
     
     def _on_frame_ready(self, frame_data: bytes, avg: float, tmin: float, tmax: float, temps_2d: list):
@@ -378,9 +385,9 @@ class IRCameraWidget(QWidget):
             )
             self.image_label.setPixmap(scaled_pixmap)
             
-            # Update stats
+            # Update stats - compact format
             self.stats_label.setText(
-                f"Avg: {avg:.1f}°C  |  Min: {tmin:.1f}°C  |  Max: {tmax:.1f}°C"
+                f"Avg: {avg:.1f}°C | Min: {tmin:.1f}°C | Max: {tmax:.1f}°C"
             )
             
             # Store temperature array for hover tooltip

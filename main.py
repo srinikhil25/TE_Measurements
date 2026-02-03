@@ -15,11 +15,14 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPalette, QColor
 from src.gui.main_window import MainWindow
 from src.database import init_database, create_tables
-from src.utils import Config
+from src.utils import Config, configure_cjk_fonts
 
 
 def main():
     """Main application entry point"""
+    # Configure matplotlib for CJK font support (must be done before any matplotlib imports)
+    configure_cjk_fonts()
+    
     # Initialize configuration
     config = Config()
     

@@ -10,20 +10,23 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QScrollArea,
     QSplitter,
+    QFrame,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+
+# Configure matplotlib for CJK font support before importing
+from src.utils import configure_cjk_fonts
+configure_cjk_fonts()
 
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import numpy as np
 import csv
 import json
 import os
 from datetime import datetime
-from typing import Optional
 
 from src.instruments.keithley_connection import KeithleyConnection
 from src.gui.seebeck_diagram_widget import SeebeckDiagramWidget
@@ -57,10 +60,6 @@ class LiveGraphWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
-        
-        self.temf_line = None
-        self.temp1_line = None
-        self.temp2_line = None
     
     def update_data(self, data: list):
         """Update graph with new data"""
@@ -156,16 +155,19 @@ class DeltaTempGraphWidget(QWidget):
 
 class SeebeckTab(QWidget):
     """
-    Enhanced Seebeck measurement tab UI with graphs, save, and export.
+    Seebeck measurement tab UI with simple 4-quadrant layout (Q1, Q2, Q3, Q4).
     
-    Encapsulates:
-    - Instrument status indicators (2182A, 2700, PK160)
-    - Parameter controls (interval, pre-time, start/stop current, ramp rates, hold time)
+    Layout:
+    - Q1 (Top-Left): Measurement Parameters
+    - Q2 (Top-Right): IR Camera Live Stream
+    - Q3 (Bottom-Left): Measurement Data Table
+    - Q4 (Bottom-Right): Live Data Visualization (Graphs)
+    
+    Features:
+    - Scrollable content area
+    - Instrument status indicators
     - Start/Stop controls
-    - Live data table fed by SeebeckSessionManager (via KeithleyConnection)
-    - Live graphs (TEMF/Temp vs Time, TEMF vs Delta Temp)
-    - Save measurement to database
-    - Export to CSV/Excel
+    - Save and export functionality
     """
 
     def __init__(self, keithley: KeithleyConnection, workbook_id: int, parent: QWidget | None = None):
@@ -192,207 +194,554 @@ class SeebeckTab(QWidget):
         self._export_excel_btn: QPushButton | None = None
         self._live_graph: LiveGraphWidget | None = None
         self._delta_graph: DeltaTempGraphWidget | None = None
-
+        
         self._init_ui()
 
     def _init_ui(self) -> None:
+        """Initialize UI with simple 4-quadrant layout"""
+        # Main layout
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # === TOP STATUS BAR ===
+        status_bar = self._create_status_bar()
+        layout.addWidget(status_bar)
+
+        # === SCROLLABLE 4-QUADRANT LAYOUT ===
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # Create 4-quadrant container
+        quadrant_container = QWidget()
+        quadrant_layout = QVBoxLayout(quadrant_container)
+        quadrant_layout.setContentsMargins(8, 8, 8, 8)
+        quadrant_layout.setSpacing(8)
+        
+        # Create 2x2 grid using nested splitters
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # Top row: Q1 (Parameters) and Q2 (IR Camera)
+        top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Q1: Parameters
+        q1_widget = self._create_q1_parameters()
+        top_splitter.addWidget(q1_widget)
+        
+        # Q2: IR Camera
+        q2_widget = self._create_q2_ir_camera()
+        top_splitter.addWidget(q2_widget)
+        
+        # Set sizes for top row - Q1 much smaller, Q2 much larger
+        # Ratio: Q1 gets 20%, Q2 gets 80% of the width
+        top_splitter.setSizes([2, 8])
+        # Set maximum heights for top row widgets to limit their size
+        q1_widget.setMaximumHeight(250)
+        q2_widget.setMaximumHeight(250)
+        main_splitter.addWidget(top_splitter)
+        
+        # Bottom row: Q3 (Data Table) and Q4 (Graphs) - MAIN CONTENT
+        bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Q3: Data Table
+        q3_widget = self._create_q3_data_table()
+        bottom_splitter.addWidget(q3_widget)
+        
+        # Q4: Graphs
+        q4_widget = self._create_q4_graphs()
+        bottom_splitter.addWidget(q4_widget)
+        
+        # Set equal sizes for bottom row
+        bottom_splitter.setSizes([1, 1])
+        main_splitter.addWidget(bottom_splitter)
+        
+        # Give bottom row MUCH more space (Q3 and Q4 are the main content)
+        # Ratio: 1 (top) : 4 (bottom) - bottom gets 4x more space
+        main_splitter.setSizes([1, 4])
+        
+        quadrant_layout.addWidget(main_splitter)
+        scroll_area.setWidget(quadrant_container)
+        
+        layout.addWidget(scroll_area)
+
+        # === BOTTOM ACTION BAR ===
+        action_bar = self._create_action_bar()
+        layout.addWidget(action_bar)
+
+    def _create_status_bar(self) -> QFrame:
+        """Create compact status bar with instrument indicators"""
+        status_frame = QFrame()
+        status_frame.setFrameShape(QFrame.Shape.Box)
+        status_frame.setStyleSheet("""
+            QFrame {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                padding: 4px;
+            }
+        """)
+        status_layout = QHBoxLayout(status_frame)
+        status_layout.setContentsMargins(8, 4, 8, 4)
+        status_layout.setSpacing(12)
+
+        # Title - smaller and more compact
+        title = QLabel("Seebeck Coefficient Measurement")
+        title_font = title.font()
+        title_font.setPointSize(11)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #212529;")
+        status_layout.addWidget(title)
+
+        status_layout.addStretch()
+
+        # Status indicator - smaller
+        self._status_indicator = QLabel("● Ready")
+        self._status_indicator.setStyleSheet("color: #6c757d; font-weight: bold; font-size: 10px;")
+        status_layout.addWidget(self._status_indicator)
+
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setStyleSheet("color: #dee2e6;")
+        status_layout.addWidget(separator)
+
+        # Instrument status indicators
+        self._add_instrument_status_row(status_layout, instruments=["2182A", "2700", "PK160"])
+
+        return status_frame
+
+    def _create_q1_parameters(self) -> QWidget:
+        """Create Q1: Measurement Parameters panel - compact version"""
+        widget = QFrame()
+        widget.setFrameShape(QFrame.Shape.Box)
+        widget.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+            }
+        """)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+        
+        
+        
+        # Parameters diagram - responsive sizing
+        self._diagram = SeebeckDiagramWidget(self)
+        # Allow it to use available space but keep reasonable constraints
+        self._diagram.setMinimumHeight(150)
+        self._diagram.setMaximumHeight(200)
+        # Let it expand horizontally to use Q1 width
+        layout.addWidget(self._diagram)
+        
+        return widget
+
+    def _create_q2_ir_camera(self) -> QWidget:
+        """Create Q2: IR Camera panel - compact version"""
+        widget = QFrame()
+        widget.setFrameShape(QFrame.Shape.Box)
+        widget.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+            }
+        """)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+        
+        # # Title - smaller
+        # title = QLabel("Q2: IR Camera Live Stream")
+        # title_font = title.font()
+        # title_font.setPointSize(9)
+        # title_font.setBold(True)
+        # title.setFont(title_font)
+        # title.setStyleSheet("color: #495057; margin-bottom: 2px;")
+        # layout.addWidget(title)
+        
+        # IR Camera widget - compact size
+        self._ir_camera = IRCameraWidget(self)
+        # Allow it to use available space but keep compact
+        self._ir_camera.setMaximumHeight(160)
+        layout.addWidget(self._ir_camera)
+        
+        return widget
+
+    def _create_q3_data_table(self) -> QWidget:
+        """Create Q3: Data Table panel"""
+        widget = QFrame()
+        widget.setFrameShape(QFrame.Shape.Box)
+        widget.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+            }
+        """)
+        layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
-
-        # Top row: title + instrument status strip
-        top_row = QHBoxLayout()
-
-        header = QLabel("Seebeck Measurement")
-        header_font = header.font()
-        header_font.setPointSize(12)
-        header_font.setBold(True)
-        header.setFont(header_font)
-        top_row.addWidget(header)
-
-        top_row.addStretch()
-
-        # Instrument LEDs + Connect / Check
-        self._add_instrument_status_row(top_row, instruments=["2182A", "2700", "PK160"])
-
-        layout.addLayout(top_row)
-
-        # Diagram (the only place where parameters are edited)
-        self._diagram = SeebeckDiagramWidget(self)
-        self._diagram.setMinimumHeight(220)
-        layout.addWidget(self._diagram)
-
-        # Start / Stop / Save / Export buttons under the diagram
-        btn_row = QHBoxLayout()
-        self._start_btn = QPushButton("Start Measurement")
-        self._start_btn.setFixedHeight(28)
-        self._start_btn.clicked.connect(self._start_session)
-
-        self._stop_btn = QPushButton("Stop")
-        self._stop_btn.setFixedHeight(28)
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self._stop_session)
-
-        self._save_btn = QPushButton("Save Measurement")
-        self._save_btn.setFixedHeight(28)
-        self._save_btn.setEnabled(False)
-        self._save_btn.clicked.connect(self._save_measurement)
-
-        self._export_csv_btn = QPushButton("Export CSV")
-        self._export_csv_btn.setFixedHeight(28)
-        self._export_csv_btn.setEnabled(False)
-        self._export_csv_btn.clicked.connect(self._export_csv)
-
-        self._export_excel_btn = QPushButton("Export Excel")
-        self._export_excel_btn.setFixedHeight(28)
-        self._export_excel_btn.setEnabled(False)
-        self._export_excel_btn.clicked.connect(self._export_excel)
-
-        btn_row.addWidget(self._start_btn)
-        btn_row.addWidget(self._stop_btn)
-        btn_row.addWidget(self._save_btn)
-        btn_row.addWidget(self._export_csv_btn)
-        btn_row.addWidget(self._export_excel_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        # Main content area: Multi-splitter layout for better space utilization
-        # Horizontal splitter: Left (Graphs) | Right (IR Camera + Table)
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # === LEFT SIDE: Graphs (Vertical Stack) ===
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(4, 4, 4, 4)
-        left_layout.setSpacing(4)
+        # Title
+        title = QLabel("Measurement Data Table")
+        title_font = title.font()
+        title_font.setPointSize(11)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #495057; margin-bottom: 4px;")
+        layout.addWidget(title)
         
-        # Live Graph
-        graph_label = QLabel("Live Graph / ライブグラフ")
-        graph_label_font = graph_label.font()
-        graph_label_font.setPointSize(10)
-        graph_label_font.setBold(True)
-        graph_label.setFont(graph_label_font)
-        left_layout.addWidget(graph_label)
-        
-        self._live_graph = LiveGraphWidget(self)
-        self._live_graph.setMinimumHeight(300)
-        left_layout.addWidget(self._live_graph)
-        
-        # Delta Temp Graph
-        delta_label = QLabel("TEMF vs Delta Temp (Δt) / TEMF vs 差温度")
-        delta_label_font = delta_label.font()
-        delta_label_font.setPointSize(10)
-        delta_label_font.setBold(True)
-        delta_label.setFont(delta_label_font)
-        left_layout.addWidget(delta_label)
-        
-        self._delta_graph = DeltaTempGraphWidget(self)
-        self._delta_graph.setMinimumHeight(300)
-        left_layout.addWidget(self._delta_graph)
-        
-        main_splitter.addWidget(left_widget)
-        
-        # === RIGHT SIDE: IR Camera + Data Table (Vertical Split) ===
-        right_splitter = QSplitter(Qt.Orientation.Vertical)
-        
-        # IR Camera (Top, larger)
-        self._ir_camera = IRCameraWidget(self)
-        self._ir_camera.setMinimumHeight(400)
-        right_splitter.addWidget(self._ir_camera)
-        
-        # Data Table (Bottom, smaller)
-        table_widget = QWidget()
-        table_layout = QVBoxLayout(table_widget)
-        table_layout.setContentsMargins(4, 4, 4, 4)
-        table_layout.setSpacing(4)
-        
-        table_label = QLabel("Data Table / データ表")
-        table_label_font = table_label.font()
-        table_label_font.setPointSize(10)
-        table_label_font.setBold(True)
-        table_label.setFont(table_label_font)
-        table_layout.addWidget(table_label)
-        
+        # Table
         self._table = QTableWidget()
         self._table.setColumnCount(5)
         self._table.setHorizontalHeaderLabels(
             ["Time [s]", "TEMF [mV]", "Temp1 [°C]", "Temp2 [°C]", "Delta Temp [°C]"]
         )
-        self._table.horizontalHeader().setStretchLastSection(True)
-        table_layout.addWidget(self._table)
         
-        right_splitter.addWidget(table_widget)
+        # Professional table styling
+        self._table.setStyleSheet("""
+            QTableWidget {
+                background-color: white;
+                alternate-background-color: #f8f9fa;
+                gridline-color: #e0e0e0;
+                border: none;
+                selection-background-color: #0078d4;
+                selection-color: white;
+            }
+            QTableWidget::item {
+                padding: 6px;
+                border: none;
+            }
+            QTableWidget::item:selected {
+                background-color: #0078d4;
+                color: white;
+            }
+            QTableWidget::item:hover {
+                background-color: #e8f4f8;
+            }
+            QHeaderView::section {
+                background-color: #f0f0f0;
+                padding: 10px;
+                border: 1px solid #dee2e6;
+                font-weight: bold;
+                font-size: 10pt;
+                color: #212529;
+            }
+        """)
+        self._table.setAlternatingRowColors(True)
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setColumnWidth(0, 100)
+        self._table.setColumnWidth(1, 120)
+        self._table.setColumnWidth(2, 120)
+        self._table.setColumnWidth(3, 120)
+        self._table.setColumnWidth(4, 140)
+        self._table.horizontalHeader().setStretchLastSection(False)
+
+        layout.addWidget(self._table)
+        return widget
+
+    def _create_q4_graphs(self) -> QWidget:
+        """Create Q4: Graphs panel"""
+        widget = QFrame()
+        widget.setFrameShape(QFrame.Shape.Box)
+        widget.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+            }
+        """)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         
-        # Set right splitter proportions (60% IR Camera, 40% Table)
-        right_splitter.setSizes([600, 400])
+        # Title
+        title = QLabel("Live Data Visualization")
+        title_font = title.font()
+        title_font.setPointSize(11)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #495057; margin-bottom: 4px;")
+        layout.addWidget(title)
         
-        main_splitter.addWidget(right_splitter)
+        # Create scrollable area for graphs
+        graphs_scroll = QScrollArea()
+        graphs_scroll.setWidgetResizable(True)
+        graphs_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        graphs_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        graphs_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
-        # Set main splitter proportions (50% Graphs, 50% IR Camera + Table)
-        main_splitter.setSizes([800, 800])
+        graphs_container = QWidget()
+        graphs_layout = QHBoxLayout(graphs_container)  # Changed to horizontal layout
+        graphs_layout.setContentsMargins(0, 0, 0, 0)
+        graphs_layout.setSpacing(12)
         
-        layout.addWidget(main_splitter)
+        # Graph 1: TEMF & Temp vs Time (wrapped in container)
+        graph1_container = QWidget()
+        graph1_container_layout = QVBoxLayout(graph1_container)
+        graph1_container_layout.setContentsMargins(0, 0, 0, 0)
+        graph1_container_layout.setSpacing(4)
+        
+        graph1_label = QLabel("TEMF & Temperature vs Time")
+        graph1_label_font = graph1_label.font()
+        graph1_label_font.setPointSize(10)
+        graph1_label_font.setBold(True)
+        graph1_label.setFont(graph1_label_font)
+        graph1_label.setStyleSheet("color: #495057;")
+        graph1_container_layout.addWidget(graph1_label)
+        
+        self._live_graph = LiveGraphWidget(self)
+        self._live_graph.setMinimumHeight(300)
+        graph1_container_layout.addWidget(self._live_graph)
+        graphs_layout.addWidget(graph1_container)
+        
+        # Graph 2: TEMF vs Delta Temp (wrapped in container)
+        graph2_container = QWidget()
+        graph2_container_layout = QVBoxLayout(graph2_container)
+        graph2_container_layout.setContentsMargins(0, 0, 0, 0)
+        graph2_container_layout.setSpacing(4)
+        
+        graph2_label = QLabel("TEMF vs Delta Temperature")
+        graph2_label_font = graph2_label.font()
+        graph2_label_font.setPointSize(10)
+        graph2_label_font.setBold(True)
+        graph2_label.setFont(graph2_label_font)
+        graph2_label.setStyleSheet("color: #495057;")
+        graph2_container_layout.addWidget(graph2_label)
+        
+        self._delta_graph = DeltaTempGraphWidget(self)
+        self._delta_graph.setMinimumHeight(300)
+        graph2_container_layout.addWidget(self._delta_graph)
+        graphs_layout.addWidget(graph2_container)
+        
+        graphs_scroll.setWidget(graphs_container)
+        layout.addWidget(graphs_scroll)
+        
+        return widget
+
+    def _create_action_bar(self) -> QFrame:
+        """Create bottom action bar with control and data buttons"""
+        action_frame = QFrame()
+        action_frame.setFrameShape(QFrame.Shape.Box)
+        action_frame.setStyleSheet("""
+            QFrame {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+                padding: 8px;
+            }
+        """)
+        layout = QHBoxLayout(action_frame)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(12)
+
+        # Control buttons group
+        control_label = QLabel("Control:")
+        control_label.setStyleSheet("font-weight: bold; color: #495057;")
+        layout.addWidget(control_label)
+
+        self._start_btn = QPushButton("▶ Start Measurement")
+        self._start_btn.setFixedHeight(36)
+        self._start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+                color: #adb5bd;
+            }
+        """)
+        self._start_btn.clicked.connect(self._start_session)
+        layout.addWidget(self._start_btn)
+
+        self._stop_btn = QPushButton("⏹ Stop")
+        self._stop_btn.setFixedHeight(36)
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+                color: #adb5bd;
+            }
+        """)
+        self._stop_btn.clicked.connect(self._stop_session)
+        layout.addWidget(self._stop_btn)
+
+        layout.addSpacing(20)
+
+        # Data actions group
+        data_label = QLabel("Data Actions:")
+        data_label.setStyleSheet("font-weight: bold; color: #495057;")
+        layout.addWidget(data_label)
+
+        self._save_btn = QPushButton("💾 Save Measurement")
+        self._save_btn.setFixedHeight(36)
+        self._save_btn.setEnabled(False)
+        self._save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QPushButton:hover {
+                background-color: #005a9e;
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+                color: #adb5bd;
+            }
+        """)
+        self._save_btn.clicked.connect(self._save_measurement)
+        layout.addWidget(self._save_btn)
+
+        self._export_csv_btn = QPushButton("📊 Export CSV")
+        self._export_csv_btn.setFixedHeight(36)
+        self._export_csv_btn.setEnabled(False)
+        self._export_csv_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+                color: #adb5bd;
+            }
+        """)
+        self._export_csv_btn.clicked.connect(self._export_csv)
+        layout.addWidget(self._export_csv_btn)
+
+        self._export_excel_btn = QPushButton("📈 Export Excel")
+        self._export_excel_btn.setFixedHeight(36)
+        self._export_excel_btn.setEnabled(False)
+        self._export_excel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+                color: #adb5bd;
+            }
+        """)
+        self._export_excel_btn.clicked.connect(self._export_excel)
+        layout.addWidget(self._export_excel_btn)
+
+        layout.addStretch()
+
+        return action_frame
 
     # --- Instrument status strip ---
 
     def _add_instrument_status_row(self, layout: QHBoxLayout, instruments: list[str]) -> None:
+        """Add compact instrument status indicators"""
         for name in instruments:
             label = QLabel("● " + name)
             label.setObjectName(f"instrument_led_seebeck_{name}")
             label.setStyleSheet(
-                "color: #999; font-size: 11px; padding-left: 4px; padding-right: 8px;"
-            )  # grey (unknown)
+                "color: #6c757d; font-size: 9px; font-weight: bold; padding: 2px 6px;"
+            )  # grey (unknown) - smaller font and padding
             layout.addWidget(label)
 
         if instruments:
             connect_btn = QPushButton("Connect")
-            connect_btn.setFixedHeight(24)
-            connect_btn.setStyleSheet(
-                """
+            connect_btn.setFixedHeight(24)  # Smaller button
+            connect_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #0078d4;
                     color: white;
                     border: none;
-                    border-radius: 4px;
+                    border-radius: 3px;
                     padding: 2px 10px;
-                    font-size: 11px;
+                    font-size: 9pt;
+                    font-weight: bold;
                 }
                 QPushButton:hover {
                     background-color: #005a9e;
                 }
-                """
-            )
+            """)
             connect_btn.clicked.connect(self._connect_instruments)
             layout.addWidget(connect_btn)
 
-            check_btn = QPushButton("Check Connection")
-            check_btn.setFixedHeight(24)
-            check_btn.setStyleSheet(
-                """
+            check_btn = QPushButton("Check")
+            check_btn.setFixedHeight(24)  # Smaller button
+            check_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #ffffff;
+                    background-color: white;
                     color: #0078d4;
                     border: 1px solid #0078d4;
-                    border-radius: 4px;
+                    border-radius: 3px;
                     padding: 2px 10px;
-                    font-size: 11px;
+                    font-size: 9pt;
+                    font-weight: bold;
                 }
                 QPushButton:hover {
                     background-color: #f0f6ff;
                 }
-                """
-            )
+            """)
             check_btn.clicked.connect(self._check_connections)
             layout.addWidget(check_btn)
 
     def _update_led(self, name: str, connected: bool) -> None:
+        """Update instrument status indicator"""
         label: QLabel = self.findChild(QLabel, f"instrument_led_seebeck_{name}")
         if not label:
             return
         color = "#28a745" if connected else "#dc3545"  # green / red
         label.setStyleSheet(
-            f"color: {color}; font-size: 11px; padding-left: 4px; padding-right: 8px;"
+            f"color: {color}; font-size: 9px; font-weight: bold; padding: 2px 6px;"
         )
+    
+    def _update_status_indicator(self, status: str, color: str = "#6c757d") -> None:
+        """Update main status indicator"""
+        if hasattr(self, '_status_indicator'):
+            self._status_indicator.setText(f"● {status}")
+            self._status_indicator.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 11px;")
 
     def _connect_instruments(self) -> None:
         statuses = self.keithley.connect_all()
@@ -448,6 +797,7 @@ class SeebeckTab(QWidget):
         if self._export_excel_btn:
             self._export_excel_btn.setEnabled(False)
 
+        self._update_status_indicator("Running", "#28a745")
         self._timer.start()
 
     def _stop_session(self) -> None:
@@ -466,6 +816,9 @@ class SeebeckTab(QWidget):
                 self._export_csv_btn.setEnabled(True)
             if self._export_excel_btn:
                 self._export_excel_btn.setEnabled(True)
+            self._update_status_indicator("Completed", "#17a2b8")
+        else:
+            self._update_status_indicator("Ready", "#6c757d")
 
     # --- Live data polling ---
 
@@ -486,6 +839,9 @@ class SeebeckTab(QWidget):
                     self._export_csv_btn.setEnabled(True)
                 if self._export_excel_btn:
                     self._export_excel_btn.setEnabled(True)
+                self._update_status_indicator("Completed", "#17a2b8")
+            else:
+                self._update_status_indicator("Ready", "#6c757d")
             return
 
         data = self.keithley.get_seebeck_data()
