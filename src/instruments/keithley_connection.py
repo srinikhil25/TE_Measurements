@@ -517,15 +517,20 @@ class SeebeckSystem:
             if r is not None and r > 0:
                 area = width * thickness
                 if area > 0 and length > 0:
-                    resistivity = r * area / length
-                    if resistivity > 0:
+                    # Original: resistivity in Ω·m
+                    # resistivity = r * area / length
+                    # if resistivity > 0:
+                    #     conductivity = 1.0 / resistivity
+                    resistivity_Ohm_m = r * area / length
+                    resistivity = resistivity_Ohm_m * 100 if resistivity_Ohm_m and resistivity_Ohm_m > 0 else None  # Ω·cm (1 Ω·m = 100 Ω·cm)
+                    if resistivity and resistivity > 0:
                         conductivity = 1.0 / resistivity
 
             return {
                 "voltage": v,
                 "current": i,
                 "resistance": r,
-                "resistivity": resistivity,
+                "resistivity": resistivity,  # now in Ω·cm
                 "conductivity": conductivity,
                 "length": length,
                 "width": width,
@@ -830,7 +835,7 @@ class IVSweepSessionManager:
                         "Voltage [V]": voltage,
                         "Current [A]": None,
                         "Resistance [Ohm]": None,
-                        "Resistivity [Ohm·m]": None,
+                        "Resistivity [Ohm·cm]": None,
                     }
                 else:
                     v = meas.get("voltage", voltage)
@@ -842,14 +847,17 @@ class IVSweepSessionManager:
                     if r is not None and r > 0 and length and width and thickness:
                         area = width * thickness
                         if area > 0 and length > 0:
-                            resistivity = r * area / length
+                            # Original: resistivity in Ω·m
+                            # resistivity = r * area / length
+                            resistivity_Ohm_m = r * area / length
+                            resistivity = resistivity_Ohm_m * 100 if resistivity_Ohm_m else None  # Ω·cm (1 Ω·m = 100 Ω·cm)
 
                     row = {
                         "Index": idx + 1,
                         "Voltage [V]": v,
                         "Current [A]": i,
                         "Resistance [Ohm]": r,
-                        "Resistivity [Ohm·m]": resistivity,
+                        "Resistivity [Ohm·cm]": resistivity,
                     }
 
                 with self.lock:

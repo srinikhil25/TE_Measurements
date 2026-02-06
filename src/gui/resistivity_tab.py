@@ -78,8 +78,8 @@ class IVCurveGraphWidget(QWidget):
         self.ax.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
         
         if voltages and currents:
-            valid_indices = [i for i, (v, i) in enumerate(zip(voltages, currents)) 
-                           if v is not None and i is not None]
+            valid_indices = [idx for idx, (v, cur) in enumerate(zip(voltages, currents))
+                            if v is not None and cur is not None]
             if valid_indices:
                 valid_voltages = [voltages[i] for i in valid_indices]
                 valid_currents = [currents[i] for i in valid_indices]
@@ -430,10 +430,10 @@ class ResistivityTab(QWidget):
         self._table = QTableWidget()
         self._table.setColumnCount(5)
         self._table.setHorizontalHeaderLabels(
-            ["#", "Voltage [V]", "Current [A]", "Resistance [Ω]", "Resistivity [Ω·m]"]
+            ["#", "Voltage [V]", "Current [A]", "Resistance [Ω]", "Resistivity [Ω·cm]"]
         )
         self._table.horizontalHeader().setStretchLastSection(True)
-        # Initially hide resistivity column
+        # Show resistivity column by default
         self._table.setColumnHidden(4, True)
         table_layout.addWidget(self._table)
 
@@ -522,7 +522,7 @@ class ResistivityTab(QWidget):
             if data and self._table.rowCount() > 0:
                 for i, row in enumerate(data):
                     if i < self._table.rowCount():
-                        resistivity = row.get("Resistivity [Ohm·m]")
+                        resistivity = row.get("Resistivity [Ohm·cm]")
                         if show and resistivity is not None:
                             self._table.setItem(i, 4, QTableWidgetItem(self._fmt_scientific(resistivity)))
                         elif not show:
@@ -630,7 +630,7 @@ class ResistivityTab(QWidget):
             self._table.setItem(i, 2, QTableWidgetItem(self._fmt_scientific(row.get("Current [A]"))))
             self._table.setItem(i, 3, QTableWidgetItem(self._fmt_scientific(row.get("Resistance [Ohm]"))))
             
-            resistivity = row.get("Resistivity [Ohm·m]")
+            resistivity = row.get("Resistivity [Ohm·cm]")
             if show_resistivity and resistivity is not None:
                 self._table.setItem(i, 4, QTableWidgetItem(self._fmt_scientific(resistivity)))
             else:
@@ -714,8 +714,8 @@ class ResistivityTab(QWidget):
         currents = [row.get("Current [A]") for row in data if row.get("Current [A]") is not None]
         resistances = [row.get("Resistance [Ohm]") for row in data 
                       if row.get("Resistance [Ohm]") is not None]
-        resistivities = [row.get("Resistivity [Ohm·m]") for row in data 
-                        if row.get("Resistivity [Ohm·m]") is not None]
+        resistivities = [row.get("Resistivity [Ohm·cm]") for row in data
+                        if row.get("Resistivity [Ohm·cm]") is not None]
 
         parsed_data = {
             "data_points": data,
@@ -797,7 +797,7 @@ class ResistivityTab(QWidget):
                 writer = csv.DictWriter(
                     f,
                     fieldnames=["Index", "Voltage [V]", "Current [A]", 
-                              "Resistance [Ohm]", "Resistivity [Ohm·m]"],
+                              "Resistance [Ohm]", "Resistivity [Ohm·cm]"],
                 )
                 writer.writeheader()
                 for row in data:
@@ -806,7 +806,7 @@ class ResistivityTab(QWidget):
                         "Voltage [V]": row.get("Voltage [V]"),
                         "Current [A]": row.get("Current [A]"),
                         "Resistance [Ohm]": row.get("Resistance [Ohm]"),
-                        "Resistivity [Ohm·m]": row.get("Resistivity [Ohm·m]"),
+                        "Resistivity [Ohm·cm]": row.get("Resistivity [Ohm·cm]"),
                     })
             QMessageBox.information(self, "Success", f"Data exported to {filename}")
         except Exception as e:
@@ -847,7 +847,7 @@ class ResistivityTab(QWidget):
             ws.title = "Resistivity Data"
 
             # Write headers
-            headers = ["#", "Voltage [V]", "Current [A]", "Resistance [Ω]", "Resistivity [Ω·m]"]
+            headers = ["#", "Voltage [V]", "Current [A]", "Resistance [Ω]", "Resistivity [Ω·cm]"]
             ws.append(headers)
 
             # Write data
@@ -857,7 +857,7 @@ class ResistivityTab(QWidget):
                     row.get("Voltage [V]"),
                     row.get("Current [A]"),
                     row.get("Resistance [Ohm]"),
-                    row.get("Resistivity [Ohm·m]"),
+                    row.get("Resistivity [Ohm·cm]"),
                 ])
 
             # Save graphs as images and add to Excel
