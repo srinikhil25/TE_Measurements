@@ -71,8 +71,9 @@ class IVCurveGraphWidget(QWidget):
         currents = [row.get("Current [A]") for row in data if row.get("Current [A]") is not None]
         
         self.ax.clear()
-        self.ax.set_xlabel('Voltage (V)', fontsize=10)
-        self.ax.set_ylabel('Current (A)', fontsize=10)
+        # I-V: Current on x-axis, Voltage on y-axis (6221 current sweep → 2182A voltage)
+        self.ax.set_xlabel('Current (A)', fontsize=10)
+        self.ax.set_ylabel('Voltage (V)', fontsize=10)
         self.ax.grid(True, alpha=0.3)
         self.ax.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
         self.ax.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
@@ -81,22 +82,22 @@ class IVCurveGraphWidget(QWidget):
             valid_indices = [idx for idx, (v, cur) in enumerate(zip(voltages, currents))
                             if v is not None and cur is not None]
             if valid_indices:
-                valid_voltages = [voltages[i] for i in valid_indices]
                 valid_currents = [currents[i] for i in valid_indices]
-                self.ax.plot(valid_voltages, valid_currents, 'bo-', markersize=4, 
+                valid_voltages = [voltages[i] for i in valid_indices]
+                self.ax.plot(valid_currents, valid_voltages, 'bo-', markersize=4, 
                            linewidth=1.5, label='I-V Curve', alpha=0.7)
                 
-                # Linear fit line if requested
-                if show_fit_line and len(valid_voltages) >= 2:
+                # Linear fit V = R*I (current x, voltage y); slope = resistance
+                if show_fit_line and len(valid_currents) >= 2:
                     try:
-                        coeffs = np.polyfit(valid_voltages, valid_currents, 1)
+                        coeffs = np.polyfit(valid_currents, valid_voltages, 1)
                         fit_line = np.poly1d(coeffs)
-                        v_min, v_max = min(valid_voltages), max(valid_voltages)
-                        v_fit = np.linspace(v_min, v_max, 100)
-                        i_fit = fit_line(v_fit)
-                        self.ax.plot(v_fit, i_fit, 'r--', linewidth=1.5, 
-                                   label='Linear Fit', alpha=0.6)
-                    except:
+                        i_min, i_max = min(valid_currents), max(valid_currents)
+                        i_fit = np.linspace(i_min, i_max, 100)
+                        v_fit = fit_line(i_fit)
+                        self.ax.plot(i_fit, v_fit, 'r--', linewidth=1.5,
+                                   label='Linear Fit (slope=R)', alpha=0.6)
+                    except Exception:
                         pass
         
         self.ax.legend(loc='best', fontsize=9)
@@ -129,24 +130,24 @@ class ResistanceGraphWidget(QWidget):
         if not data:
             return
         
-        voltages = [row.get("Voltage [V]") for row in data if row.get("Voltage [V]") is not None]
-        resistances = [row.get("Resistance [Ohm]") for row in data 
+        currents = [row.get("Current [A]") for row in data if row.get("Current [A]") is not None]
+        resistances = [row.get("Resistance [Ohm]") for row in data
                       if row.get("Resistance [Ohm]") is not None]
         
         self.ax.clear()
-        self.ax.set_xlabel('Voltage (V)', fontsize=10)
+        self.ax.set_xlabel('Current (A)', fontsize=10)
         self.ax.set_ylabel('Resistance (Ω)', fontsize=10)
         self.ax.grid(True, alpha=0.3)
         self.ax.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
         self.ax.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
         
-        if voltages and resistances:
-            valid_indices = [i for i, (v, r) in enumerate(zip(voltages, resistances)) 
-                           if v is not None and r is not None]
+        if currents and resistances:
+            valid_indices = [i for i, (c, r) in enumerate(zip(currents, resistances))
+                            if c is not None and r is not None]
             if valid_indices:
-                valid_voltages = [voltages[i] for i in valid_indices]
+                valid_currents = [currents[i] for i in valid_indices]
                 valid_resistances = [resistances[i] for i in valid_indices]
-                self.ax.plot(valid_voltages, valid_resistances, 'ro-', markersize=4, 
+                self.ax.plot(valid_currents, valid_resistances, 'ro-', markersize=4, 
                            linewidth=1.5, label='Resistance', alpha=0.7)
         
         self.ax.legend(loc='best', fontsize=9)
@@ -192,12 +193,11 @@ class ResistivityTab(QWidget):
         self._resistance_graph: ResistanceGraphWidget | None = None
 
         # Parameter inputs
-        self._start_voltage_input: QDoubleSpinBox | None = None
-        self._stop_voltage_input: QDoubleSpinBox | None = None
+        self._start_current_input: QDoubleSpinBox | None = None
+        self._stop_current_input: QDoubleSpinBox | None = None
         self._points_input: QSpinBox | None = None
         self._delay_input: QDoubleSpinBox | None = None
-        self._current_limit_input: QDoubleSpinBox | None = None
-        self._voltage_limit_input: QDoubleSpinBox | None = None
+        self._compliance_input: QDoubleSpinBox | None = None
         self._length_input: QDoubleSpinBox | None = None
         self._width_input: QDoubleSpinBox | None = None
         self._thickness_input: QDoubleSpinBox | None = None
@@ -222,9 +222,7 @@ class ResistivityTab(QWidget):
         top_row.addWidget(header)
 
         top_row.addStretch()
-
-        # Instrument LED for 2401
-        self._add_instrument_status_row(top_row, instruments=["2401"])
+        self._add_instrument_status_row(top_row, instruments=["2182A", "6221"])
 
         layout.addLayout(top_row)
 
@@ -242,19 +240,19 @@ class ResistivityTab(QWidget):
         sweep_layout = QFormLayout()
         sweep_layout.setSpacing(6)
 
-        self._start_voltage_input = QDoubleSpinBox()
-        self._start_voltage_input.setRange(-100.0, 100.0)
-        self._start_voltage_input.setValue(0.0)
-        self._start_voltage_input.setDecimals(3)
-        self._start_voltage_input.setSuffix(" V")
-        sweep_layout.addRow("Start Voltage:", self._start_voltage_input)
+        self._start_current_input = QDoubleSpinBox()
+        self._start_current_input.setRange(-0.105, 0.105)
+        self._start_current_input.setValue(-0.01)
+        self._start_current_input.setDecimals(6)
+        self._start_current_input.setSuffix(" A")
+        sweep_layout.addRow("Start Current:", self._start_current_input)
 
-        self._stop_voltage_input = QDoubleSpinBox()
-        self._stop_voltage_input.setRange(-100.0, 100.0)
-        self._stop_voltage_input.setValue(10.0)
-        self._stop_voltage_input.setDecimals(3)
-        self._stop_voltage_input.setSuffix(" V")
-        sweep_layout.addRow("Stop Voltage:", self._stop_voltage_input)
+        self._stop_current_input = QDoubleSpinBox()
+        self._stop_current_input.setRange(-0.105, 0.105)
+        self._stop_current_input.setValue(0.01)
+        self._stop_current_input.setDecimals(6)
+        self._stop_current_input.setSuffix(" A")
+        sweep_layout.addRow("Stop Current:", self._stop_current_input)
 
         self._points_input = QSpinBox()
         self._points_input.setRange(2, 1000)
@@ -268,19 +266,12 @@ class ResistivityTab(QWidget):
         self._delay_input.setSuffix(" ms")
         sweep_layout.addRow("Delay:", self._delay_input)
 
-        self._current_limit_input = QDoubleSpinBox()
-        self._current_limit_input.setRange(0.001, 1.0)
-        self._current_limit_input.setValue(0.1)
-        self._current_limit_input.setDecimals(3)
-        self._current_limit_input.setSuffix(" A")
-        sweep_layout.addRow("Current Limit:", self._current_limit_input)
-
-        self._voltage_limit_input = QDoubleSpinBox()
-        self._voltage_limit_input.setRange(1.0, 100.0)
-        self._voltage_limit_input.setValue(21.0)
-        self._voltage_limit_input.setDecimals(1)
-        self._voltage_limit_input.setSuffix(" V")
-        sweep_layout.addRow("Voltage Limit:", self._voltage_limit_input)
+        self._compliance_input = QDoubleSpinBox()
+        self._compliance_input.setRange(0.1, 105.0)
+        self._compliance_input.setValue(21.0)
+        self._compliance_input.setDecimals(1)
+        self._compliance_input.setSuffix(" V")
+        sweep_layout.addRow("Compliance (6221):", self._compliance_input)
 
         sweep_group.setLayout(sweep_layout)
         params_layout.addWidget(sweep_group)
@@ -504,13 +495,15 @@ class ResistivityTab(QWidget):
 
     def _connect_instruments(self) -> None:
         statuses = self.keithley.connect_all()
-        status = statuses.get("2401")
-        self._update_led("2401", bool(status and status.connected))
+        for name in ("2182A", "6221"):
+            status = statuses.get(name)
+            self._update_led(name, bool(status and status.connected))
 
     def _check_connections(self) -> None:
         statuses = self.keithley.get_connection_status()
-        status = statuses.get("2401")
-        self._update_led("2401", bool(status and status.connected))
+        for name in ("2182A", "6221"):
+            status = statuses.get(name)
+            self._update_led(name, bool(status and status.connected))
     
     def _update_table_columns(self) -> None:
         """Show/hide resistivity column based on checkbox"""
@@ -531,17 +524,16 @@ class ResistivityTab(QWidget):
     # --- Session control ---
 
     def _start_sweep(self) -> None:
-        if not all([self._start_voltage_input, self._stop_voltage_input, 
-                   self._points_input, self._delay_input]):
+        if not all([self._start_current_input, self._stop_current_input,
+                    self._points_input, self._delay_input, self._compliance_input]):
             return
 
         params = {
-            "start_voltage": self._start_voltage_input.value(),
-            "stop_voltage": self._stop_voltage_input.value(),
+            "start_current": self._start_current_input.value(),
+            "stop_current": self._stop_current_input.value(),
             "points": self._points_input.value(),
             "delay_ms": self._delay_input.value(),
-            "current_limit": self._current_limit_input.value(),
-            "voltage_limit": self._voltage_limit_input.value(),
+            "compliance_voltage": self._compliance_input.value(),
         }
 
         # Add sample dimensions if provided

@@ -114,9 +114,9 @@ class Config:
         return self._config.get('instruments', 'addr_pk160', fallback='GPIB0::15::INSTR')
 
     @property
-    def addr_2401(self):
-        return self._config.get('instruments', 'addr_2401', fallback='GPIB0::24::INSTR')
-    
+    def addr_6221(self):
+        return self._config.get('instruments', 'addr_6221', fallback='GPIB0::24::INSTR')
+
     # --- IR Camera settings ---
     @property
     def ir_camera_dll_path(self):
@@ -125,4 +125,3 @@ class Config:
     @property
     def ir_camera_config_path(self):
         return self._config.get('instruments', 'ir_camera_config_path', fallback='C:\\IrDirectSDK\\generic.xml')
-

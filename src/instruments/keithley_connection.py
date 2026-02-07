@@ -7,12 +7,12 @@ for use inside the TE Measurements desktop application.
 Responsibilities:
 - Low-level connection to Keithley / PK160 instruments via VISA
 - High-level Seebeck measurement loop (with phases)
-- High-level resistivity / I-V measurement using 2401
 - Threaded session manager for asynchronous Seebeck measurements
 """
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 import logging
@@ -26,6 +26,20 @@ from src.models import MeasurementType
 
 
 logger = logging.getLogger(__name__)
+
+# Use 64-bit VISA on Windows so GPIB resources (e.g. KUSB-488A) are found.
+# Default PyVISA may load visa32.dll; visa64.dll is required for GPIB visibility.
+_VISA64_PATH = "C:\\Windows\\System32\\visa64.dll"
+
+
+def _resource_manager() -> pyvisa.ResourceManager:
+    """Return a VISA ResourceManager. On Windows, prefer visa64.dll so GPIB is visible."""
+    if sys.platform == "win32":
+        try:
+            return pyvisa.ResourceManager(_VISA64_PATH)
+        except Exception as e:
+            logger.debug("Using default VISA backend (visa64 not used): %s", e)
+    return pyvisa.ResourceManager()
 
 
 @dataclass
@@ -50,12 +64,16 @@ class Keithley2182A:
                 self.disconnect()
             except Exception:
                 pass
-
+     
         try:
             if rm is None:
-                rm = pyvisa.ResourceManager()
+                rm = _resource_manager()
             self.instrument = rm.open_resource(self.resource_name)
-            self.instrument.timeout = 20000
+            # 60 s for slow nanovoltmeter :READ? (avoids VISA -110/-113 timeout)
+            self.instrument.timeout = 60000
+            # Match VB setinputEOS/setoutputEOS: LF for SCPI over GPIB
+            self.instrument.read_termination = "\n"
+            self.instrument.write_termination = "\n"
             self.connected = True
             logger.info("Connected to Keithley 2182A at %s", self.resource_name)
             return True
@@ -86,9 +104,11 @@ class Keithley2182A:
         if not self.connected:
             return False
         self.instrument.write("*RST")
+        time.sleep(0.3)
         self.instrument.write(":CONF:VOLT")
         self.instrument.write(":VOLT:DIGITS 8")
         self.instrument.write(":VOLT:NPLC 5")
+        time.sleep(0.2)
         logger.info("Configured Keithley 2182A")
         return True
 
@@ -96,6 +116,7 @@ class Keithley2182A:
         if not self.connected:
             return None
         try:
+            self.instrument.clear()
             response = self.instrument.query(":READ?")
             value_str = response.split(",")[0].split("_")[0].strip()
             value = float(value_str)
@@ -123,9 +144,11 @@ class PK160:
 
         try:
             if rm is None:
-                rm = pyvisa.ResourceManager()
+                rm = _resource_manager()
             self.instrument = rm.open_resource(self.resource_name)
             self.instrument.timeout = 20000
+            self.instrument.read_termination = "\n"
+            self.instrument.write_termination = "\n"
             self.connected = True
             logger.info("Connected to PK160 at %s", self.resource_name)
             return True
@@ -136,7 +159,7 @@ class PK160:
                 logger.error(
                     "VI_ERROR_ALLOC: Resource allocation failed. "
                     "Check for other processes using this instrument."
-                )
+                ) 
             self.connected = False
             self.instrument = None
             return False
@@ -166,7 +189,7 @@ class PK160:
     def set_current(self, value: float) -> bool:
         if not self.connected:
             return False
-        self.instrument.write(f"#1 ISET{value}")
+        self.instrument.write(f"#1 ISET {value}")
         logger.info("PK160 set current: %s", value)
         return True
 
@@ -195,9 +218,12 @@ class Keithley2700:
 
         try:
             if rm is None:
-                rm = pyvisa.ResourceManager()
+                rm = _resource_manager()
             self.instrument = rm.open_resource(self.resource_name)
-            self.instrument.timeout = 20000
+            # 60 s for temperature :READ? over GPIB (avoids VISA -110/-113 timeout)
+            self.instrument.timeout = 60000
+            self.instrument.read_termination = "\n"
+            self.instrument.write_termination = "\n"
             self.connected = True
             logger.info("Connected to Keithley 2700 at %s", self.resource_name)
             return True
@@ -228,7 +254,7 @@ class Keithley2700:
         if not self.connected:
             return False
         self.instrument.write("*RST")
-        time.sleep(0.1)
+        time.sleep(0.3)
         self.instrument.write(f":ROUT:CLOS (@{channel})")
         self.instrument.write(":CONF:TEMP")
         self.instrument.write(":UNIT:TEMP C")
@@ -244,7 +270,8 @@ class Keithley2700:
             return None
         try:
             self.instrument.write(f":ROUT:CLOS (@{channel})")
-            time.sleep(0.1)
+            time.sleep(0.2)
+            self.instrument.clear()
             response = self.instrument.query(":READ?")
             value_str = response.split(",")[0].split("_")[0].strip()
             value = float(value_str)
@@ -255,8 +282,8 @@ class Keithley2700:
             return None
 
 
-class Keithley2401:
-    """SourceMeter for I-V and resistivity measurements."""
+class Keithley6221:
+    """DC current source (6221) for resistivity via GPIB. Used with 2182A nanovoltmeter."""
 
     def __init__(self, resource_name: str):
         self.resource_name = resource_name
@@ -271,20 +298,17 @@ class Keithley2401:
                 pass
         try:
             if rm is None:
-                rm = pyvisa.ResourceManager()
+                rm = _resource_manager()
             self.instrument = rm.open_resource(self.resource_name)
-            self.instrument.timeout = 20000
+            self.instrument.timeout = 60000
+            self.instrument.read_termination = "\n"
+            self.instrument.write_termination = "\n"
             self.connected = True
-            logger.info("Connected to Keithley 2401 at %s", self.resource_name)
+            logger.info("Connected to Keithley 6221 at %s", self.resource_name)
             return True
         except Exception as e:  # pragma: no cover
             error_str = str(e)
-            logger.error("Failed to connect to Keithley 2401: %s", error_str)
-            if "VI_ERROR_ALLOC" in error_str or "-1073807300" in error_str:
-                logger.error(
-                    "VI_ERROR_ALLOC: Resource allocation failed. "
-                    "Check for other processes using this instrument."
-                )
+            logger.error("Failed to connect to Keithley 6221: %s", error_str)
             self.connected = False
             self.instrument = None
             return False
@@ -292,35 +316,43 @@ class Keithley2401:
     def disconnect(self) -> None:
         if self.instrument:
             try:
+                self.instrument.write(":OUTP OFF")
+            except Exception:
+                pass
+            try:
                 self.instrument.close()
             except Exception as e:  # pragma: no cover
-                logger.warning("Error closing 2401 connection: %s", e)
+                logger.warning("Error closing 6221 connection: %s", e)
             finally:
                 self.instrument = None
                 self.connected = False
-                logger.info("Disconnected Keithley 2401")
+                logger.info("Disconnected Keithley 6221")
 
-    def configure_voltage_source(self, voltage_limit: float = 1.0, current_limit: float = 0.1) -> bool:
+    def configure_dc_current(self, compliance_voltage: float = 21.0) -> bool:
+        """Configure for DC current sourcing. Compliance in volts (0.1–105 V)."""
         if not self.connected:
             return False
         try:
             self.instrument.write("*RST")
-            time.sleep(0.5)
-            self.instrument.write(":SOUR:FUNC VOLT")
-            self.instrument.write(":SOUR:VOLT:LEV 0")
-            self.instrument.write(f":SOUR:VOLT:RANG {abs(voltage_limit)}")
-            self.instrument.write(f":SENS:CURR:PROT {abs(current_limit)}")
-            self.instrument.write(":SENS:FUNC 'CURR'")
-            self.instrument.write(":SENS:CURR:RANG:AUTO ON")
-            self.instrument.write(":FORM:ELEM CURR, VOLT")
-            logger.info(
-                "Configured 2401 as voltage source (V_limit=%s, I_limit=%s)",
-                voltage_limit,
-                current_limit,
-            )
+            time.sleep(0.3)
+            self.instrument.write(":SOUR:FUNC CURR")
+            self.instrument.write(f":SOUR:CURR:COMP {min(105, max(0.1, compliance_voltage))}")
+            self.instrument.write(":SOUR:CURR:LEV 0")
+            logger.info("Configured 6221 DC current, compliance=%.1f V", compliance_voltage)
             return True
         except Exception as e:  # pragma: no cover
-            logger.error("Failed to configure 2401: %s", e)
+            logger.error("Failed to configure 6221: %s", e)
+            return False
+
+    def set_current(self, current_amps: float) -> bool:
+        """Set DC current level in Amps (e.g. ±0.105 for 6221)."""
+        if not self.connected:
+            return False
+        try:
+            self.instrument.write(f":SOUR:CURR:LEV {current_amps}")
+            return True
+        except Exception as e:  # pragma: no cover
+            logger.error("Failed to set 6221 current: %s", e)
             return False
 
     def output_on(self) -> bool:
@@ -328,10 +360,9 @@ class Keithley2401:
             return False
         try:
             self.instrument.write(":OUTP ON")
-            logger.info("2401 output ON")
             return True
         except Exception as e:  # pragma: no cover
-            logger.error("Failed to turn on 2401 output: %s", e)
+            logger.error("Failed to turn on 6221 output: %s", e)
             return False
 
     def output_off(self) -> bool:
@@ -339,48 +370,10 @@ class Keithley2401:
             return False
         try:
             self.instrument.write(":OUTP OFF")
-            logger.info("2401 output OFF")
             return True
         except Exception as e:  # pragma: no cover
-            logger.error("Failed to turn off 2401 output: %s", e)
+            logger.error("Failed to turn off 6221 output: %s", e)
             return False
-
-    def set_voltage(self, voltage: float) -> bool:
-        """Set the output voltage level"""
-        if not self.connected:
-            return False
-        try:
-            self.instrument.write(f":SOUR:VOLT:LEV {voltage}")
-            logger.info("2401 set voltage: %s V", voltage)
-            return True
-        except Exception as e:  # pragma: no cover
-            logger.error("Failed to set voltage on 2401: %s", e)
-            return False
-
-    def read_measurement(self) -> Optional[Dict[str, float]]:
-        if not self.connected:
-            return None
-        try:
-            self.instrument.write(":INIT")
-            time.sleep(0.1)
-            response = self.instrument.query(":FETCH?")
-            values = response.strip().split(",")
-            if len(values) < 2:
-                return None
-            val1 = float(values[0])
-            val2 = float(values[1])
-            # Heuristic: larger magnitude is treated as voltage
-            if abs(val1) > abs(val2) or abs(val1) < 0.001:
-                voltage = val1
-                current = val2
-            else:
-                current = val1
-                voltage = val2
-            resistance = voltage / current if abs(current) > 1e-12 else None
-            return {"voltage": voltage, "current": current, "resistance": resistance}
-        except Exception as e:  # pragma: no cover
-            logger.error("Failed to read measurement from 2401: %s", e)
-            return None
 
 
 class SeebeckSystem:
@@ -388,39 +381,51 @@ class SeebeckSystem:
 
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
-        self.rm = pyvisa.ResourceManager()
+        self.rm = _resource_manager()
         self.k2182a = Keithley2182A(self.config.addr_2182a)
         self.k2700 = Keithley2700(self.config.addr_2700)
         self.pk160 = PK160(self.config.addr_pk160)
-        self.k2401 = Keithley2401(self.config.addr_2401)
+        self.k6221 = Keithley6221(self.config.addr_6221)
         self.connected = False
 
-    def connect_all(self) -> Dict[str, InstrumentStatus]:
-        """Connect to all instruments used for Seebeck / resistivity."""
+    def _wrap_status(
+        self,
+        statuses: Dict[str, InstrumentStatus],
+        name: str,
+        ok: bool,
+        resource: str,
+        error: Optional[str] = None,
+    ) -> None:
+        statuses[name] = InstrumentStatus(
+            name=name, connected=ok, resource_name=resource, error=error
+        )
+
+    def connect_seebeck(self) -> Dict[str, InstrumentStatus]:
+        """Connect only instruments for Seebeck (2182A, 2700, PK160). 6221 not required."""
         statuses: Dict[str, InstrumentStatus] = {}
-
-        def _wrap(name: str, ok: bool, resource: str, error: Optional[str] = None):
-            statuses[name] = InstrumentStatus(
-                name=name, connected=ok, resource_name=resource, error=error
-            )
-
-        # 2182A
         ok_2182a = self.k2182a.connect(self.rm)
-        _wrap("2182A", ok_2182a, self.config.addr_2182a, None if ok_2182a else "connect failed")
-
-        # 2700
+        self._wrap_status(statuses, "2182A", ok_2182a, self.config.addr_2182a, None if ok_2182a else "connect failed")
         ok_2700 = self.k2700.connect(self.rm)
-        _wrap("2700", ok_2700, self.config.addr_2700, None if ok_2700 else "connect failed")
-
-        # PK160
+        self._wrap_status(statuses, "2700", ok_2700, self.config.addr_2700, None if ok_2700 else "connect failed")
         ok_pk160 = self.pk160.connect(self.rm)
-        _wrap("PK160", ok_pk160, self.config.addr_pk160, None if ok_pk160 else "connect failed")
+        self._wrap_status(statuses, "PK160", ok_pk160, self.config.addr_pk160, None if ok_pk160 else "connect failed")
+        self.connected = ok_2182a and ok_2700 and ok_pk160
+        if not self.connected:
+            logger.error("Seebeck instruments connection failed: %s", statuses)
+        return statuses
 
-        # 2401
-        ok_2401 = self.k2401.connect(self.rm)
-        _wrap("2401", ok_2401, self.config.addr_2401, None if ok_2401 else "connect failed")
-
-        self.connected = all(s.connected for s in statuses.values())
+    def connect_all(self) -> Dict[str, InstrumentStatus]:
+        """Connect to all instruments (2182A, 2700, PK160, 6221)."""
+        statuses: Dict[str, InstrumentStatus] = {}
+        ok_2182a = self.k2182a.connect(self.rm)
+        self._wrap_status(statuses, "2182A", ok_2182a, self.config.addr_2182a, None if ok_2182a else "connect failed")
+        ok_2700 = self.k2700.connect(self.rm)
+        self._wrap_status(statuses, "2700", ok_2700, self.config.addr_2700, None if ok_2700 else "connect failed")
+        ok_pk160 = self.pk160.connect(self.rm)
+        self._wrap_status(statuses, "PK160", ok_pk160, self.config.addr_pk160, None if ok_pk160 else "connect failed")
+        ok_6221 = self.k6221.connect(self.rm)
+        self._wrap_status(statuses, "6221", ok_6221, self.config.addr_6221, None if ok_6221 else "connect failed")
+        self.connected = ok_2182a and ok_2700 and ok_pk160 and ok_6221
         if not self.connected:
             logger.error("Not all instruments connected successfully: %s", statuses)
         return statuses
@@ -429,7 +434,7 @@ class SeebeckSystem:
         self.k2182a.disconnect()
         self.k2700.disconnect()
         self.pk160.disconnect()
-        self.k2401.disconnect()
+        self.k6221.disconnect()
         self.connected = False
 
     def initialize_seebeck_instruments(self) -> None:
@@ -456,98 +461,6 @@ class SeebeckSystem:
             "Temp1 [oC]": temp1,
             "Temp2 [oC]": temp2,
         }
-
-    def measure_resistivity_single(
-        self,
-        length: float,
-        width: float,
-        thickness: float,
-        voltage: Optional[float] = None,
-        current: Optional[float] = None,
-    ) -> Dict[str, Optional[float]]:
-        """
-        Single-point resistivity measurement using 2401.
-        Mirrors the algorithm in seebeck_system.
-        """
-        if not self.k2401.connected:
-            logger.error("Keithley 2401 not connected")
-            return {
-                "voltage": None,
-                "current": None,
-                "resistance": None,
-                "resistivity": None,
-                "conductivity": None,
-                "error": "Keithley 2401 not connected",
-            }
-
-        try:
-            if voltage is not None:
-                self.k2401.configure_voltage_source(
-                    voltage_limit=abs(voltage) * 1.2, current_limit=0.1
-                )
-                # In a full implementation we would set the source level here
-            else:
-                applied_current = current if current is not None else 0.01
-                # For now, we only configure as in legacy; current-level setting can be added.
-                self.k2401.configure_voltage_source(
-                    voltage_limit=1.0, current_limit=abs(applied_current) * 1.2
-                )
-
-            self.k2401.output_on()
-            time.sleep(0.5)
-            measurement = self.k2401.read_measurement()
-            self.k2401.output_off()
-
-            if measurement is None:
-                return {
-                    "voltage": None,
-                    "current": None,
-                    "resistance": None,
-                    "resistivity": None,
-                    "conductivity": None,
-                    "error": "Failed to read measurement",
-                }
-
-            v = measurement.get("voltage")
-            i = measurement.get("current")
-            r = measurement.get("resistance")
-
-            resistivity = None
-            conductivity = None
-            if r is not None and r > 0:
-                area = width * thickness
-                if area > 0 and length > 0:
-                    # Original: resistivity in Ω·m
-                    # resistivity = r * area / length
-                    # if resistivity > 0:
-                    #     conductivity = 1.0 / resistivity
-                    resistivity_Ohm_m = r * area / length
-                    resistivity = resistivity_Ohm_m * 100 if resistivity_Ohm_m and resistivity_Ohm_m > 0 else None  # Ω·cm (1 Ω·m = 100 Ω·cm)
-                    if resistivity and resistivity > 0:
-                        conductivity = 1.0 / resistivity
-
-            return {
-                "voltage": v,
-                "current": i,
-                "resistance": r,
-                "resistivity": resistivity,  # now in Ω·cm
-                "conductivity": conductivity,
-                "length": length,
-                "width": width,
-                "thickness": thickness,
-            }
-        except Exception as e:  # pragma: no cover
-            logger.error("Failed to measure resistivity: %s", e)
-            self.k2401.output_off()
-            return {
-                "voltage": None,
-                "current": None,
-                "resistance": None,
-                "resistivity": None,
-                "conductivity": None,
-                "error": str(e),
-            }
-
 
 class SeebeckSessionManager:
     """
@@ -612,9 +525,9 @@ class SeebeckSessionManager:
 
     def _run_session(self, params: Dict[str, Any]) -> None:
         try:
-            statuses = self.system.connect_all()
+            statuses = self.system.connect_seebeck()
             if not all(s.connected for s in statuses.values()):
-                self.session_status = "error: Failed to connect to one or more instruments."
+                self.session_status = "error: Failed to connect to one or more instruments (2182A, 2700, PK160)."
                 self.session_active = False
                 return
 
@@ -755,10 +668,8 @@ class IVSweepSessionManager:
         if self.session_thread and self.session_thread.is_alive():
             self.session_thread.join(timeout=2.0)
         try:
-            if self.system.k2401.connected:
-                self.system.k2401.output_off()
-        finally:
-            # Don't disconnect all - other instruments might be in use
+            self.system.k6221.output_off()
+        except Exception:
             pass
 
     def get_data(self) -> List[Dict[str, Any]]:
@@ -777,22 +688,26 @@ class IVSweepSessionManager:
         }
 
     def _run_sweep(self, params: Dict[str, Any]) -> None:
-        """Run I-V sweep in background thread"""
+        """Run I-V sweep: 6221 sources current, 2182A reads voltage. R = V/I, resistivity from dimensions."""
         try:
-            # Connect to 2401 if not already connected
-            if not self.system.k2401.connected:
-                statuses = self.system.connect_all()
-                if not self.system.k2401.connected:
-                    self.session_status = "error: Failed to connect to Keithley 2401"
-                    self.session_active = False
-                    return
+            statuses = self.system.connect_all()
+            if not self.system.k2182a.connected or not self.system.k6221.connected:
+                self.session_status = "error: Failed to connect to 2182A and 6221 (required for resistivity)."
+                self.session_active = False
+                return
 
-            start_voltage = float(params["start_voltage"])
-            stop_voltage = float(params["stop_voltage"])
-            points = int(params["points"])
-            delay_ms = float(params.get("delay_ms", 50.0))
-            current_limit = float(params.get("current_limit", 0.1))
-            voltage_limit = float(params.get("voltage_limit", 21.0))
+            # Configure 2182A for voltage (resistivity measurement)
+            self.system.k2182a.configure()
+            compliance = float(params.get("compliance_voltage", 21.0))
+            if not self.system.k6221.configure_dc_current(compliance_voltage=compliance):
+                self.session_status = "error: Failed to configure 6221"
+                self.session_active = False
+                return
+
+            start_current = float(params.get("start_current", -0.01))
+            stop_current = float(params.get("stop_current", 0.01))
+            points = int(params.get("points", 10))
+            delay_s = float(params.get("delay_ms", 50.0)) / 1000.0
             length = params.get("length")
             width = params.get("width")
             thickness = params.get("thickness")
@@ -802,79 +717,48 @@ class IVSweepSessionManager:
                 self.session_active = False
                 return
 
-            # Calculate voltage steps
-            step = (stop_voltage - start_voltage) / (points - 1)
-            voltages = [start_voltage + i * step for i in range(points)]
+            currents = [
+                start_current + (stop_current - start_current) * i / (points - 1)
+                for i in range(points)
+            ]
 
-            # Configure 2401
-            vmax = max(abs(start_voltage), abs(stop_voltage), abs(voltage_limit))
-            if not self.system.k2401.configure_voltage_source(
-                voltage_limit=vmax, current_limit=current_limit
-            ):
-                self.session_status = "error: Failed to configure 2401"
-                self.session_active = False
-                return
-
-            self.system.k2401.output_on()
-
-            # Perform sweep
-            for idx, voltage in enumerate(voltages):
+            for idx, current_amps in enumerate(currents):
                 if not self.session_active:
                     break
+                self.system.k6221.set_current(current_amps)
+                self.system.k6221.output_on()
+                time.sleep(delay_s)
+                voltage = self.system.k2182a.read_voltage()
+                self.system.k6221.output_off()
 
-                # Set voltage
-                self.system.k2401.set_voltage(voltage)
-                time.sleep(delay_ms / 1000.0)
+                r = (voltage / current_amps) if (voltage is not None and abs(current_amps) > 1e-12) else None
+                resistivity = None
+                if r is not None and r > 0 and length and width and thickness:
+                    area = width * thickness
+                    if area > 0 and length > 0:
+                        resistivity_Ohm_m = r * area / length
+                        resistivity = resistivity_Ohm_m * 100.0 if resistivity_Ohm_m else None  # Ω·cm
 
-                # Read measurement
-                meas = self.system.k2401.read_measurement()
-                
-                if meas is None:
-                    row = {
-                        "Index": idx + 1,
-                        "Voltage [V]": voltage,
-                        "Current [A]": None,
-                        "Resistance [Ohm]": None,
-                        "Resistivity [Ohm·cm]": None,
-                    }
-                else:
-                    v = meas.get("voltage", voltage)
-                    i = meas.get("current")
-                    r = meas.get("resistance")
-
-                    # Calculate resistivity if dimensions provided
-                    resistivity = None
-                    if r is not None and r > 0 and length and width and thickness:
-                        area = width * thickness
-                        if area > 0 and length > 0:
-                            # Original: resistivity in Ω·m
-                            # resistivity = r * area / length
-                            resistivity_Ohm_m = r * area / length
-                            resistivity = resistivity_Ohm_m * 100 if resistivity_Ohm_m else None  # Ω·cm (1 Ω·m = 100 Ω·cm)
-
-                    row = {
-                        "Index": idx + 1,
-                        "Voltage [V]": v,
-                        "Current [A]": i,
-                        "Resistance [Ohm]": r,
-                        "Resistivity [Ohm·cm]": resistivity,
-                    }
-
+                row = {
+                    "Index": idx + 1,
+                    "Current [A]": current_amps,
+                    "Voltage [V]": voltage,
+                    "Resistance [Ohm]": r,
+                    "Resistivity [Ohm·cm]": resistivity,
+                }
                 with self.lock:
                     self.session_data.append(row)
 
-            self.system.k2401.output_off()
+            self.system.k6221.output_off()
             self.session_status = "finished"
             self.session_active = False
-
         except Exception as e:  # pragma: no cover
             logger.exception("I-V sweep failed: %s", e)
             self.session_status = f"error: {e}"
             self.session_active = False
             try:
-                if self.system.k2401.connected:
-                    self.system.k2401.output_off()
-            except:
+                self.system.k6221.output_off()
+            except Exception:
                 pass
 
 
@@ -896,7 +780,7 @@ class KeithleyConnection:
     # --- Connection / status helpers for UI ---
 
     def connect_all(self) -> Dict[str, InstrumentStatus]:
-        """Attempt to connect to all four instruments; returns per-device status."""
+        """Attempt to connect to all instruments (2182A, 2700, PK160); returns per-device status."""
         return self.system.connect_all()
 
     def disconnect_all(self) -> None:
@@ -923,10 +807,10 @@ class KeithleyConnection:
                 connected=self.system.pk160.connected,
                 resource_name=self.config.addr_pk160,
             ),
-            "2401": InstrumentStatus(
-                name="2401",
-                connected=self.system.k2401.connected,
-                resource_name=self.config.addr_2401,
+            "6221": InstrumentStatus(
+                name="6221",
+                connected=self.system.k6221.connected,
+                resource_name=self.config.addr_6221,
             ),
         }
 
@@ -972,10 +856,12 @@ class KeithleyConnection:
         voltage: Optional[float] = None,
         current: Optional[float] = None,
     ) -> Dict[str, Optional[float]]:
-        return self.system.measure_resistivity_single(
-            length=length,
-            width=width,
-            thickness=thickness,
-            voltage=voltage,
-            current=current,
-        )
+        """Single-point resistivity. Not available (no SourceMeter configured)."""
+        return {
+            "voltage": None,
+            "current": None,
+            "resistance": None,
+            "resistivity": None,
+            "conductivity": None,
+            "error": "Resistivity measurement not available (no SourceMeter configured)",
+        }
